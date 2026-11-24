@@ -597,6 +597,110 @@
       );
     return result;
   }
+  // Release the J4→JX / JX→EE bend. Fixing both drive readings and an
+  // assembly side fixes J4 and J7. EE can rotate about JX until the J8
+  // pin triangle reaches internal or external tangency.
+  function hingeDomain(p, q1, q2, branch = home.branch, freeAngles = {}) {
+    const empty = { intervals: [], events: [] };
+    if (!Array.isArray(branch) || branch.length !== 3 || !branch.every((s) => s === -1 || s === 1))
+      return { ...empty, ...failure("invalid", "branch", "A branch must contain three signs (+1 or −1).") };
+    const B = black(p, q1, branch[0], freeAngles);
+    if (!B.ok) return { ...empty, ...B };
+    if (!inBounds(q2, p.q2min, p.q2max, p.mode === "rotary" ? 2e-12 : tolerance(p)))
+      return { ...empty, ...failure("limit", "actuator", "M2 is outside its configured limits.") };
+    const X = B.JX;
+    const J5 = atM2(p, q2);
+    const blue = pick(X, p.d, J5, p.f, branch[1], "J6", freeAngles);
+    if (!blue.ok) return { ...empty, ...blue, JX: X, J4: B.J4, J5 };
+    const J7 = add(X, turn(sub(blue.point, X), p.beta, p.e / p.d));
+    const arm = sub(X, B.J4);
+    const baseAngle = arg(arm);
+    // Use the identical floating-point reconstruction as forward(), including at a tangent.
+    const tipAt = (delta) => add(X, turn(arm, delta, p.c / p.b));
+    const cuts = [-Math.PI, Math.PI];
+    for (const reach of [Math.abs(p.h - p.g), p.h + p.g]) {
+      for (const E of discrete(circles(X, p.c, J7, reach)))
+        cuts.push(wrap(arg(sub(E, X)) - baseAngle));
+    }
+    cuts.sort((a, b) => a - b);
+    const angles = cuts.filter((v, i) => i === 0 || v - cuts[i - 1] > 128 * EPS);
+    // Keep the fundamental domain's end even when an event is at the seam.
+    angles[angles.length - 1] = Math.PI;
+    const kindAt = (v) => circles(tipAt(v), p.h, J7, p.g).kind;
+    const events = [], intervals = [];
+    for (let i = 0; i < angles.length; i++) {
+      const delta = angles[i], kind = kindAt(delta);
+      if (kind !== "none") events.push({ delta, kind });
+      if (i === 0) continue;
+      const lo = angles[i - 1], hi = delta;
+      if (kindAt((lo + hi) / 2) !== "none") intervals.push({ lo, hi });
+    }
+    const geometry = { JX: X, J4: B.J4, J5, J6: blue.point, J7 };
+    if (!intervals.length && !events.length)
+      return { ...empty, ...geometry, ...failure("unreachable", "J8", "No bend angle closes the terminal pin.") };
+    return { ok: true, intervals, events, ...geometry };
+  }
+
+  // Position fixes the circles |X−M1|=r1, |X−E|=c. Every compatible J4
+  // determines one bend angle. At that angle the downstream inverse problem
+  // is exactly the existing closed-chain problem with a known black assembly.
+  function hingeInverse(p, target) {
+    const out = { solutions: [], families: [], diagnostics: [], exceptional: [] };
+    const invalid = validParams(p);
+    if (invalid) {
+      out.diagnostics.push(invalid);
+      return out;
+    }
+    if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y) ||
+        [target.q1, target.q2, target.phi, target.blackAngle, target.blueAngle, target.terminalAngle]
+          .some((v) => v != null && !Number.isFinite(v))) {
+      out.diagnostics.push("Target coordinates and supplied angles or actuator samples must be finite.");
+      return out;
+    }
+    const E = [target.x, target.y];
+    const { M1, J3 } = basePoints(p);
+    const centers = circles(M1, p.r1, E, p.c);
+    const motor1 = [];
+    if (centers.kind === "continuum") {
+      const q1 = target.q1 ?? (p.q1min != null && p.q1min === p.q1max ? p.q1min : null);
+      if (p.q1min == null || p.q1min !== p.q1max)
+        out.exceptional.push({ kind: "hinge-q1", coordinate: "q1", target: E, sampledAt: q1,
+          condition: "EE coincides with M1 and c equals r1. Supply q1 to evaluate a member subject to the remaining closures." });
+      if (inBounds(q1, p.q1min, p.q1max, 2e-12)) {
+        motor1.push(q1);
+      }
+    } else {
+      for (const X of discrete(centers)) {
+        const coordinate = rotaryBounds(p, "q1", arg(sub(X, M1)));
+        if (coordinate) motor1.push(coordinate.value);
+      }
+    }
+    for (const q1 of motor1) {
+      // Rebuild the center from its selected winding exactly as in forward().
+      const X = add(M1, mul(unit(q1), p.r1));
+      const fours = circles(J3, p.a, X, p.b);
+      const positions = discrete(fours);
+      if (fours.kind === "continuum") {
+        out.exceptional.push({ kind: "hinge-j4", coordinate: "angle(J3→J4)", q1, JX: X,
+          sampledAt: target.blackAngle ?? null,
+          condition: "J3 and JX coincide with equal radii. Supply blackAngle to sample J4 and recover its bend." });
+        if (target.blackAngle != null) positions.push(add(J3, mul(unit(target.blackAngle), p.a)));
+      }
+      for (const J4 of positions) {
+        const delta = wrap(arg(sub(E, X)) - arg(sub(X, J4)));
+        const fixed = { ...p, delta };
+        const known = { q1, s4: turnSign(J3, X, J4, p.a), blackAngle: arg(sub(J4, J3)) };
+        const result = inverse(fixed, target, known);
+        for (const key of ["solutions", "families", "exceptional"])
+          for (const entry of result[key]) out[key].push({ ...entry, delta });
+      }
+    }
+    if (!out.solutions.length && !out.families.length && !out.exceptional.length)
+      out.diagnostics.push("No free-hinge assembly satisfies the target, pin closures and actuator limits.");
+    for (const item of out.exceptional)
+      if (item.condition && !out.diagnostics.includes(item.condition)) out.diagnostics.push(item.condition);
+    return out;
+  }
   return Object.freeze({
     defaults,
     home,
@@ -613,5 +717,7 @@
     rotaryBounds,
     black,
     familyDomain,
+    hingeDomain,
+    hingeInverse,
   });
 });

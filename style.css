@@ -99,6 +99,114 @@ main {
   padding-top: 22px;
   padding-bottom: 36px;
 }
+.model-bar {
+  display: grid;
+  grid-template-columns: minmax(155px, 200px) minmax(200px, 1.3fr) minmax(240px, 1fr);
+  gap: 10px 22px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 14px 20px;
+}
+.model-choice {
+  display: grid;
+  gap: 5px;
+}
+.model-choice label,
+.hinge-input label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+.model-choice select,
+.hinge-input input[type="number"] {
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--ink);
+  border: 1px solid #a8bfba;
+  border-radius: 4px;
+  background: #fff;
+}
+.model-help,
+.precision-panel p,
+.hinge-convention,
+.hinge-domain,
+.residual-note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.model-help {
+  font-size: 13px;
+}
+.model-evidence {
+  margin-top: 3px;
+}
+.model-evidence > summary {
+  color: var(--green);
+  padding: 2px 0;
+  font-size: 12px;
+}
+.precision-panel {
+  border-left: 2px solid #8eb3a4;
+  padding-left: 14px;
+}
+.precision-panel strong {
+  color: var(--ink);
+}
+.precision-panel .check {
+  margin-top: 5px;
+}
+.hinge-controls {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.hinge-input {
+  display: grid;
+  grid-template-columns: max-content 75px minmax(110px, 270px);
+  align-items: center;
+  gap: 10px;
+}
+.hinge-input input[type="range"] {
+  margin: 0;
+}
+.hinge-convention {
+  margin-top: 5px;
+}
+.hinge-domain {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.residual-note {
+  margin-top: 3px;
+  font-size: 11px;
+}
+@media (max-width: 800px) {
+  .model-bar {
+    grid-template-columns: minmax(140px, 185px) minmax(0, 1fr);
+    gap: 10px 15px;
+    padding: 13px 15px;
+  }
+  .precision-panel {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 520px) {
+  .model-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .model-choice {
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+  .hinge-input {
+    grid-template-columns: minmax(0, 1fr) 75px;
+  }
+  .hinge-input input[type="range"] {
+    grid-column: 1 / -1;
+  }
+}
 .bench {
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(258px, 19vw, 284px) clamp(265px, 22vw, 320px);

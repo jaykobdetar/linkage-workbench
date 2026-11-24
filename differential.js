@@ -78,6 +78,25 @@
     const smallest = largest ? Math.abs(a * d - b * c) / largest : 0;
     return [largest, smallest];
   }
+  // Only called after the dimensionless matrix has been checked for full rank.
+  function inverse3(matrix) {
+    const rows = matrix.map((row, i) => [...row, ...[0, 1, 2].map(j => Number(i === j))]);
+    for (let j = 0; j < 3; j++) {
+      let pivot = j;
+      for (let i = j + 1; i < 3; i++) {
+        if (Math.abs(rows[i][j]) > Math.abs(rows[pivot][j])) pivot = i;
+      }
+      [rows[j], rows[pivot]] = [rows[pivot], rows[j]];
+      const divisor = rows[j][j];
+      rows[j] = rows[j].map(value => value / divisor);
+      for (let i = 0; i < 3; i++) {
+        if (i === j) continue;
+        const multiple = rows[i][j];
+        rows[i] = rows[i].map((value, column) => value - multiple * rows[j][column]);
+      }
+    }
+    return rows.map(row => row.slice(3));
+  }
   function pair(value, name, size) {
     if (value === undefined) return Array(size).fill(0);
     if (!Array.isArray(value) || value.length !== size || !value.every(Number.isFinite)) {
@@ -86,12 +105,19 @@
     return value;
   }
   function evaluate(p, state, options = {}) {
+    return evaluateCoordinates(p, state, options, false);
+  }
+  function freeHinge(p, state, options = {}) {
+    return evaluateCoordinates(p, state, options, true);
+  }
+  function evaluateCoordinates(p, state, options, isFree) {
     if (!state || !state.ok) return {
       regular: false,
       reason: "A valid closed assembly is required."
     };
-    const rates = pair(options.rates, "rates", 2);
-    const inputAccel = pair(options.accelerations, "accelerations", 2);
+    const coordinates = isFree ? ["q1", "q2", "delta"] : ["q1", "q2"];
+    const rates = pair(options.rates, "rates", coordinates.length);
+    const inputAccel = pair(options.accelerations, "accelerations", coordinates.length);
     const wrench = pair(options.wrench, "wrench", 3);
     const pt = state.points,
       rotary = p.mode === "rotary";
@@ -147,7 +173,7 @@
         pose: [...EE, k("gamma") + k("tool")]
       };
     }
-    const vars = ["alpha", "betaAngle", "gamma", "q1", "q2"];
+    const vars = ["alpha", "betaAngle", "gamma", ...coordinates];
     const partials = vars.map(name => variation({
       [name]: 1
     }));
@@ -155,7 +181,7 @@
     const H = constraintJacobian.map(row => row.slice(0, 3));
     const B = constraintJacobian.map(row => row.slice(3));
     const characteristicLength = Math.max(p.a, p.b, p.c, p.d, p.e, p.f, p.g, p.h, p.r1, rotary ? p.r2 : 0);
-    const qScale = [characteristicLength, rotary ? characteristicLength : 1];
+    const qScale = [characteristicLength, rotary ? characteristicLength : 1, characteristicLength];
     // Equilibrate units before comparing pivots. Multiply slider column by L
     // to express all generalized coordinates as angles or length divided by L.
     const denom = [p.a * p.b, p.f * p.d, p.g * p.h];
@@ -163,22 +189,26 @@
     const scaled = constraintJacobian.map((row, i) => row.map((v, j) => v * (j === 4 && !rotary ? characteristicLength : 1) / denom[i]));
     const rankH = matrixRank(scaled.map(row => row.slice(0, 3)));
     const rankConstraint = matrixRank(scaled);
+    const freeWithMotorsLocked = isFree ? scaled.map(row => [...row.slice(0, 3), row[5]]) : null;
     // A tangent may be returned as a single labeled root by the geometric solver.
     // Use its measured angle and constraint rank, not its branch label, here.
     const regular = rankH === 3 && tangency.every(x => Math.abs(x) > EPS_RANK);
     const out = {
       regular,
+      freeHinge: isFree,
+      coordinates,
       reason: regular ? "" : "Dependent constraint matrix is singular or numerically rank deficient.",
       H,
       B,
       constraintJacobian,
+      constraintResiduals: spans.map((span, i) => norm(span) - p[rows[i][2]]),
       rankH,
       rankConstraint,
       tangency,
       characteristicLength,
       transforms,
-      mobilityLinearized: 5 - rankConstraint,
-      lockedNullity: 3 - rankH,
+      mobilityLinearized: vars.length - rankConstraint,
+      lockedNullity: isFree ? 4 - matrixRank(freeWithMotorsLocked) : 3 - rankH,
       nearSingular: tangency.some(x => Math.abs(x) < 1e-4),
       poseJacobian: null,
       dependentJacobian: null,
@@ -225,7 +255,7 @@
         total
       };
     }
-    const input = ["q1", "q2"].map((name, j) => closed({
+    const input = coordinates.map((name, j) => closed({
       [name]: 1
     }, partials[j + 3]));
     const J = transpose(input.map(x => x.total.pose));
@@ -236,6 +266,7 @@
     }
     const sensitivity = {};
     for (const name of parameters) {
+      if (isFree && name === "delta") continue;
       const seed = {
         [name]: 1
       };
@@ -247,12 +278,13 @@
       betaAngle: dz[1],
       gamma: dz[2],
       q1: rates[0],
-      q2: rates[1]
+      q2: rates[1],
+      delta: isFree ? rates[2] : 0
     });
     // Quadratic (centripetal) terms at q''=z''=0. Geometric parameters are constant.
     const centripetal = (r, w) => scale(r, -w * w);
     const Xb = centripetal(r1, rates[0]);
-    const Eb = add(Xb, centripetal(c, dz[0]));
+    const Eb = add(Xb, centripetal(c, dz[0] + (isFree ? rates[2] : 0)));
     const bias = {
       M1: zero(),
       M2: zero(),
@@ -276,7 +308,8 @@
       betaAngle: ddz[1],
       gamma: ddz[2],
       q1: inputAccel[0],
-      q2: inputAccel[1]
+      q2: inputAccel[1],
+      delta: isFree ? inputAccel[2] : 0
     });
     const acc = {};
     for (const name of Object.keys(bias)) acc[name] = add(bias[name], linearAcc.points[name]);
@@ -300,6 +333,41 @@
       angularAcceleration: ddz[2]
     };
     memberJacobians.tool = J[2].slice();
+    const effortMap = transpose(J);
+    const effort = mult(effortMap, wrench);
+    Object.assign(out, {
+      poseJacobian: J,
+      positionJacobian: J.slice(0, 2),
+      dependentJacobian: Z,
+      pointJacobians,
+      memberJacobians,
+      sensitivity,
+      effortMap,
+      effort,
+      poseVelocity: v.pose,
+      poseAcceleration: [...acc.EE, ddz[2]],
+      jointVelocity: v.points,
+      jointAcceleration: acc,
+      dependentVelocity: dz,
+      dependentAcceleration: ddz,
+      memberMotion,
+      constraintRates: v.constraint,
+      constraintAccelerations: rows.map(([from, to], i) => {
+        const dv = vFrom(v.points, from, to);
+        return dot(dv, dv) + dot(spans[i], vFrom(acc, from, to));
+      })
+    });
+    if (isFree) {
+      // An unactuated revolute joint adds a configuration coordinate. Its
+      // generalized load is a torque about JX, not an available motor effort.
+      const outputScale = [1, 1, characteristicLength];
+      const normalized = J.map((row, i) => row.map((x, j) => x * outputScale[i] / qScale[j]));
+      out.poseRank = matrixRank(normalized);
+      out.positionRank = matrixRank(normalized.slice(0, 2));
+      out.poseInverse = out.poseRank === 3 ?
+        inverse3(normalized).map((row, i) => row.map((x, j) => x * outputScale[j] / qScale[i])) : null;
+      return out;
+    }
 
     // The black transmission fixes EE xy at each q1. A speed magnitude sets the
     // first reduced coordinate even at a stationary point; no tangent is defined there.
@@ -316,8 +384,6 @@
       inv = [[1 / speed, 0], [-reduced[1][0] / (speed * reduced[1][1]), 1 / reduced[1][1]]];
       left = inv.map(([u, w]) => [u * tangent[0], u * tangent[1], w]);
     }
-    const effortMap = transpose(J),
-      effort = mult(effortMap, wrench);
     // C=.5(|span|²-L²); -C_z^T lambda supplies the passive generalized
     // reaction. Positive lambda*L pulls the span ends toward one another.
     const passiveLoad = mult(partials.slice(0, 3).map(x => x.pose), wrench);
@@ -328,14 +394,8 @@
       L78: p.g * last
     };
     Object.assign(out, {
-      poseJacobian: J,
-      dependentJacobian: Z,
-      pointJacobians,
-      memberJacobians,
-      sensitivity,
       poseRank,
       tangent,
-      positionJacobian: J.slice(0, 2),
       positionRank: tangent ? 1 : 0,
       positionPseudoInverse: tangent ? [scale(tangent, 1 / speed), [0, 0]] : [[0, 0], [0, 0]],
       reducedJacobian: reduced,
@@ -344,28 +404,15 @@
       amplificationMatrix: normalized,
       reducedSingularValues: singularValues,
       normalizedForceGains: poseRank === 2 ? [1 / singularValues[1], 1 / singularValues[0]] : null,
-      effortMap,
       inverseEffortMap: inv ? transpose(inv) : null,
-      effort,
       balancingEffort: effort.map(x => -x),
-      spanAxialForces,
-      poseVelocity: v.pose,
-      poseAcceleration: [...acc.EE, ddz[2]],
-      jointVelocity: v.points,
-      jointAcceleration: acc,
-      dependentVelocity: dz,
-      dependentAcceleration: ddz,
-      memberMotion,
-      constraintRates: v.constraint,
-      constraintAccelerations: rows.map(([from, to], i) => {
-        const dv = vFrom(v.points, from, to);
-        return dot(dv, dv) + dot(spans[i], vFrom(acc, from, to));
-      })
+      spanAxialForces
     });
     return out;
   }
   return {
     evaluate,
+    freeHinge,
     frame,
     members,
     parameters,

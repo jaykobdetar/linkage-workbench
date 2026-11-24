@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Linkage workbench</title>
-    <link rel="stylesheet" href="style.css?v=2" />
+    <link rel="stylesheet" href="style.css?v=3" />
   </head>
   <body>
     <header class="mast">
@@ -33,6 +33,35 @@
       </div>
     </header>
     <main>
+      <section class="card model-bar" aria-label="Mechanism interpretation and display precision">
+        <div class="model-choice">
+          <label for="elbowModel">Black elbow at JX</label>
+          <select id="elbowModel" aria-describedby="elbowHelp">
+            <option value="fixed">Fixed bend</option>
+            <option value="hinged">Passive hinge</option>
+          </select>
+        </div>
+        <div class="model-help">
+          <p id="elbowHelp">J4–JX–EE is one rigid body. On a chosen assembly branch, M1 sets the end-effector position along a curve and M2 changes the tool heading.</p>
+          <details class="model-evidence">
+            <summary>How could we tell which model fits?</summary>
+            <p>In a side-on recording, hold M1 still and move M2. Track the centers of J4, JX and the EE pin. If J4 and JX stay in place while EE shifts beyond measurement error, the black bend changes. A stationary EE is compatible with either model if the load or friction holds a free hinge still.</p>
+          </details>
+        </div>
+        <div class="precision-panel">
+          <p id="precisionNote"><strong>Sketch-based dimensions.</strong> Positions and angles are rounded model predictions. Physical accuracy requires measurements of the mechanism.</p>
+          <label class="check"><input id="calcDigits" type="checkbox" aria-describedby="precisionNote" />Show extra calculation digits</label>
+        </div>
+        <div id="hingeControls" class="hinge-controls" hidden>
+          <div class="hinge-input">
+            <label for="hingeAngleN">Passive hinge angle (°)</label>
+            <input id="hingeAngleN" type="number" step="any" min="-180" max="180" aria-describedby="hingeDomain" />
+            <input id="hingeAngle" type="range" min="-180" max="180" step="any" aria-label="Passive hinge angle in degrees" aria-describedby="hingeDomain" />
+          </div>
+          <p class="hinge-convention">Positive angles turn counterclockwise from J4→JX to JX→EE.</p>
+          <p id="hingeDomain" class="hinge-domain" aria-live="polite"></p>
+        </div>
+      </section>
       <section class="bench">
         <article class="card stage">
           <div class="card-head">
@@ -62,8 +91,8 @@
         <aside class="card live-transforms" id="liveTransforms" aria-labelledby="transformsTitle">
           <div class="card-head">
             <div>
-              <h2 id="transformsTitle">Motion matrices</h2>
-              <p>Tool frame at the end effector</p>
+              <h2 id="transformsTitle">Tool coordinate transforms</h2>
+              <p>Coordinates of the same point in two frames</p>
             </div>
           </div>
           <div class="transform-body">
@@ -75,7 +104,7 @@
               <figcaption id="reverseCaption"><strong>Reverse</strong>World → tool</figcaption>
               <div class="bracketed"><table id="toolReverse" aria-labelledby="reverseCaption"></table></div>
             </figure>
-            <p class="transform-note">Read the two tool axes down the first two columns of Forward. Its last column gives the end effector’s world coordinates in mm.</p>
+            <p class="transform-note">Forward takes a point from the tool frame into the world frame. Reverse takes it back. In both matrices the first two columns rotate the axes and the last column gives the translation in mm.</p>
             <p id="transformStatus" role="status" hidden></p>
             <details class="transform-form">
               <summary>Analytical form</summary>
@@ -134,8 +163,11 @@
               </button>
             </div>
             <div id="inversePanel" hidden>
-              <p class="subtle">With snapping on, drag the end effector (EE) along its path to find M1 at the current M2.
+              <p id="fixedInverseHelp" class="subtle">With snapping on, drag the end effector (EE) along its path to find M1 at the current M2.
                 For an exact target, enter X and Y. Add a tool angle to solve for both motors.</p>
+              <p id="hingeInverseHelp" class="subtle" hidden>Exact X and Y determine possible M1 and passive hinge angles at the current M2.
+                Include a tool angle to solve for M2 as well. Each result gives the passive hinge angle the pose requires. The two motors alone cannot select that angle.
+                Drag with snapping on to follow the amber path at fixed M2 and hinge angle, or turn snapping off to pick an exact target.</p>
               <div class="fields target-fields">
                 <label>X <small>mm</small><input id="tx" type="number" step="any" /></label
                 ><label>Y <small>mm</small><input id="ty" type="number" step="any" /></label>
@@ -145,7 +177,8 @@
                 >Tool angle (°)<input id="tphi" type="number" step="any"
               /></label>
               <button id="solve" class="primary">Solve exact target</button>
-              <p class="mini"><strong>Displayed motors</strong><br /><output id="inverseMotors" aria-live="off"></output></p>
+              <p class="mini"><strong>Displayed motors</strong><br /><output id="inverseMotors" aria-live="off"></output>
+                <span id="inverseHingeRow" hidden><br />Passive JX angle δ · <output id="inverseHinge" aria-live="off"></output></span></p>
               <div id="ikResults" class="mini"></div>
             </div>
             <div class="assembly-settings">
@@ -187,7 +220,7 @@
               <p id="notice" role="status" class="notice">Ready.</p>
               <div class="divider"></div>
               <nav class="companion-links" aria-label="Schematic">
-                <a href="schematic.svg">View reconstructed schematic</a>
+                <a id="schematicLink" href="schematic.svg">View reconstructed schematic</a>
               </nav>
             </div>
           </div>
@@ -197,7 +230,8 @@
         <div><span>EE position X</span><strong id="rx">—</strong><small>mm</small></div>
         <div><span>EE position Y</span><strong id="ry">—</strong><small>mm</small></div>
         <div><span>Tool orientation</span><strong id="rphi">—</strong><small>°</small></div>
-        <div><span>Max length residual</span><strong id="rr">—</strong><small>mm</small></div>
+        <div><span>Solver closure residual</span><strong id="rr">—</strong><small>mm</small>
+          <p class="residual-note">Largest mismatch in the model’s loop constraints.</p></div>
       </section>
       <section class="card inspector">
         <div class="tabs" aria-label="Inspection panels">
@@ -223,6 +257,8 @@
             <h2>Constraint solver</h2>
             <p>
               Compare the displayed analytical assembly with an independently iterated geometric closure.
+              The offline engineering checks compared each elbow model with Drake and MuJoCo across 10,000 regular configurations.
+              These comparisons measure agreement for the assumed geometry. Physical accuracy remains unmeasured.
             </p>
           </div>
           <button class="primary" id="compare">Compare solvers</button
@@ -234,9 +270,9 @@
         </div>
       </section>
     </main>
-    <script src="kinematics.js"></script>
-    <script src="differential.js?v=2"></script>
-    <script src="numerical.js"></script>
-    <script src="app.js?v=2"></script>
+    <script src="kinematics.js?v=3"></script>
+    <script src="differential.js?v=3"></script>
+    <script src="numerical.js?v=3"></script>
+    <script src="app.js?v=3"></script>
   </body>
 </html>

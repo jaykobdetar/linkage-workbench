@@ -48,6 +48,12 @@
     raf = 0;
   let playback = null,
     freeAngles = {};
+  let elbow = "fixed", fixedBend = K.defaults.delta, hingeSample = null, hingeDomain = null;
+  const isHinged = () => elbow === "hinged";
+  function setHingeSample(angle) {
+    hingeSample = wrap(angle);
+    p.delta = hingeSample;
+  }
   let comparison = null,
     crossingInfo = [];
   const rateKeys = ["dq1", "dq2", "ddq1", "ddq2", "fx", "fy", "moment"];
@@ -76,14 +82,16 @@
   }
   function updateToolTransforms(tool) {
     const values = [tool?.forward, tool?.inverse];
+    const extraDigits = $("calcDigits").checked;
     transformCells.forEach((cells, direction) => {
       const coefficients = values[direction]?.flat();
       cells.forEach((cell, i) => {
         const value = coefficients?.[i];
         let display = "—";
         if (Number.isFinite(value)) {
-          const digits = i % 3 === 2 ? 3 : 6;
-          display = Math.abs(value) >= 1e6 ? value.toExponential(3) : String(Number(fmt(value, digits)));
+          const translation = i === 2 || i === 5;
+          const digits = translation ? (extraDigits ? 3 : 0) : (extraDigits ? 6 : 3);
+          display = Math.abs(value) >= 1e6 ? value.toExponential(extraDigits ? 5 : 2) : String(Number(fmt(value, digits)));
         }
         if (cell.textContent !== display) cell.textContent = display;
       });
@@ -97,6 +105,10 @@
     $("notice").classList.toggle("warn", warn);
   }
   function home() {
+    elbow = "fixed";
+    fixedBend = K.defaults.delta;
+    hingeSample = null;
+    hingeDomain = null;
     freeAngles = {};
     for (const k of [4, 6, 8]) $("free" + k).value = "";
     p = defaultParams();
@@ -145,6 +157,10 @@
     $("q2label").textContent = rotary ? "crank angle" : "slider travel";
     $("inverseMotors").value = state.ok ? "M1 " + fmt(deg(q1)) + "° · M2 " +
       fmt(rotary ? deg(q2) : q2) + (rotary ? "°" : " mm") : "No assembled pose";
+    $("fixedInverseHelp").hidden = isHinged();
+    $("hingeInverseHelp").hidden = !isHinged();
+    $("inverseHingeRow").hidden = !isHinged();
+    $("inverseHinge").value = state.ok && isHinged() ? fmt(deg(p.delta)) + "°" : "—";
     [4, 6, 8].forEach((id, i) => $("s" + id).value = String(branch[i]));
   }
   function allowedForward(params, a, b, choice) {
@@ -159,8 +175,52 @@
     }
     return st;
   }
+  function updateElbowControls() {
+    const hinged = isHinged();
+    $("elbowModel").value = elbow;
+    $("hingeControls").hidden = !hinged;
+    $("elbowHelp").textContent = hinged
+      ? "Normally 3 degrees of freedom. M1 and M2 leave the black elbow free. Choose a passive angle to see one possible pose with the motors held still."
+      : "Normally 2 degrees of freedom. J4–JX–EE is one rigid piece. On each assembly branch, M1 sets the EE pivot’s position and M2 can change the tool’s heading.";
+    $("schematicLink").setAttribute("href", hinged ? "schematic-hinged.svg" : "schematic.svg");
+    if (!hinged) return;
+    const angle = deg(p.delta);
+    $("hingeAngle").value = angle;
+    $("hingeAngleN").value = Number(fmt(angle, $("calcDigits").checked ? 7 : 2));
+    const domain = hingeDomain;
+    const ranges = domain.intervals.map(({lo, hi}) => fmt(deg(lo), 1) + "° to " + fmt(deg(hi), 1) + "°");
+    const isolated = domain.events.filter(event => !domain.intervals.some(({lo, hi}) =>
+      Math.abs(event.delta - lo) < 1e-10 || Math.abs(event.delta - hi) < 1e-10));
+    ranges.push(...isolated.map(event => fmt(deg(event.delta), 1) + "°"));
+    $("hingeDomain").textContent = domain.ok
+      ? "With both motors held, the hinge angles that close the links are approximately " + ranges.join(" or ") + "."
+      : domain.reason;
+  }
+  function switchElbow(next) {
+    if (next === elbow) return;
+    stopPlay();
+    if (!isHinged()) fixedBend = p.delta;
+    elbow = next;
+    if (isHinged()) setHingeSample(hingeSample ?? fixedBend);
+    else p.delta = fixedBend;
+    trail = [];
+    drag = null;
+    clearTarget();
+    rateFields();
+    renderGeo();
+    refresh({record: false});
+    fit(isHinged());
+  }
+  function changeHinge(value) {
+    if (!isHinged() || !Number.isFinite(value)) return;
+    stopPlay();
+    clearTarget();
+    setHingeSample(value * rad);
+    refresh();
+  }
   function refresh(options = {}) {
     state = allowedForward(p, q1, q2, branch);
+    hingeDomain = isHinged() ? K.hingeDomain(p, q1, q2, branch, freeAngles) : null;
     comparison = null;
     diff = null;
     crossingInfo = state.ok ? findCrossings(state.points) : [];
@@ -171,10 +231,14 @@
         if (trail.length > 1000) trail.shift();
       }
     } else if (!state.ok && trail.length && trail.at(-1) !== null) trail.push(null);
-    if (!options.keepMessage) say(state.ok ? "Drag EE to move along this assembly’s path." : state.reason, !state.ok);
+    if (!options.keepMessage) {
+      const guidance = isHinged() ? "The displayed pose uses the selected passive hinge angle." : "Drag EE to move along this assembly’s path.";
+      say(state.ok ? guidance : state.reason, !state.ok);
+    }
     if (!state.ok && options.keepMessage) say(state.reason, true);
     if (state.ok && $("numericOverlay").checked) comparison = N.solve(p, q1, q2, state.points);
     updateInputs();
+    updateElbowControls();
     updateStatus();
     drawInspection();
     queueDraw();
@@ -193,16 +257,20 @@
       status = "Singular assembly";
     } else if (d?.nearSingular) {
       status = "Near singularity";
-    } else if (d && d.poseRank < 2) {
+    } else if (d && d.poseRank < (isHinged() ? 3 : 2)) {
       status = "Pose rank loss";
+    } else if (valid && isHinged()) {
+      status = "Sampled hinge pose";
     }
     $("validity").textContent = status;
-    $("validity").className = "status" + (status === "Unreachable" ? " bad" : status === "Assembled" ? "" : " warn");
+    const assembled = status === "Assembled" || status === "Sampled hinge pose";
+    $("validity").className = "status" + (status === "Unreachable" ? " bad" : assembled ? "" : " warn");
     $("freeControls").hidden = state.code !== "continuum" && !state.continuum && !Object.keys(freeAngles).length;
     if (state.code === "continuum") $("freeControls").open = true;
-    $("rx").textContent = valid ? fmt(state.points.EE[0]) : "—";
-    $("ry").textContent = valid ? fmt(state.points.EE[1]) : "—";
-    $("rphi").textContent = valid ? fmt(deg(state.phi), 2) : "—";
+    const extraDigits = $("calcDigits").checked;
+    $("rx").textContent = valid ? fmt(state.points.EE[0], extraDigits ? 3 : 0) : "—";
+    $("ry").textContent = valid ? fmt(state.points.EE[1], extraDigits ? 3 : 0) : "—";
+    $("rphi").textContent = valid ? fmt(deg(state.phi), extraDigits ? 4 : 1) : "—";
     $("rr").textContent = valid ? maxResidual().toExponential(2) : "—";
   }
   function maxResidual() {
@@ -248,6 +316,7 @@
   }
   function adopt(solution) {
     stopPlay();
+    if (isHinged()) setHingeSample(solution.delta);
     if (solution.continuum) for (const n of [4, 6, 8]) {
       const v = solution.freeAngles?.["J" + n];
       if (Number.isFinite(v)) {
@@ -276,38 +345,55 @@
       y,
       q1,
       q2,
+      blackAngle: freeAngles.J4,
       blueAngle: freeAngles.J6 == null ? undefined : freeAngles.J6 + p.beta,
       terminalAngle: freeAngles.J8
     };
     if (phi !== undefined) args.phi = phi;
-    const result = K.inverse(p, args);
+    const hinged = isHinged();
+    const result = hinged ? K.hingeInverse(p, args) : K.inverse(p, args);
     ikList = (result.solutions || []).filter(s => !blockedPairs.size || !findCrossings(s.points).some(c => blockedPairs.has(c.pair)));
     const families = result.families || [];
     target = [x, y];
     let html = "";
     if (ikList.length) {
       const branchChanges = s => s.branch.filter((sign, i) => sign !== branch[i]).length;
-      const motorDistance = s => Math.hypot(wrap(s.q1 - q1),
-        p.mode === "rotary" ? wrap(s.q2 - q2) : (s.q2 - q2) / p.r1);
-      ikList.sort((a, b) => branchChanges(a) - branchChanges(b) || motorDistance(a) - motorDistance(b));
+      const coordinateDistance = s => Math.hypot(wrap(s.q1 - q1),
+        p.mode === "rotary" ? wrap(s.q2 - q2) : (s.q2 - q2) / p.r1,
+        hinged ? wrap(s.delta - p.delta) : 0);
+      ikList.sort((a, b) => branchChanges(a) - branchChanges(b) || coordinateDistance(a) - coordinateDistance(b));
       const msg = ikList.length + (ikList.length === 1 ? " solution" : " solutions") +
         (phi === undefined ? " at the current M2." : " for this position and tool angle.");
-      html = "<p>" + esc(msg) + "</p>" + ikList.map((s, i) => '<button class="chip" data-sol="' + i + '" title="Select this solution">#' + (i + 1) + " " + (s.signs || s.branch).map(signLabel).join("") + " · M1 " + fmt(deg(s.q1), 3) + "° · M2 " + fmt(p.mode === "rotary" ? deg(s.q2) : s.q2, 3) + (p.mode === "rotary" ? "°" : " mm") + "</button>").join("");
-      const alreadyAtTarget = state.ok && branchChanges(ikList[0]) === 0 && motorDistance(ikList[0]) <= 1e-12;
-      say(alreadyAtTarget ? "The displayed pose already reaches this target." : "Solved. The linkage shows the selected motor settings.");
+      const buttons = ikList.map((s, i) => {
+        const signs = (s.signs || s.branch).map(signLabel).join("");
+        const m2 = p.mode === "rotary" ? fmt(deg(s.q2)) + "°" : fmt(s.q2) + " mm";
+        const bend = hinged ? " · δ " + fmt(deg(s.delta)) + "°" : "";
+        return '<button class="chip" data-sol="' + i + '" title="Select this solution">#' +
+          (i + 1) + " " + signs + " · M1 " + fmt(deg(s.q1)) + "° · M2 " + m2 + bend + "</button>";
+      });
+      html = "<p>" + esc(msg) + "</p>" + buttons.join("");
+      const alreadyAtTarget = state.ok && branchChanges(ikList[0]) === 0 && coordinateDistance(ikList[0]) <= 1e-12;
+      say(alreadyAtTarget ? "The displayed pose already reaches this target." : hinged ? "Solved. The linkage shows the selected motors and passive hinge angle." : "Solved. The linkage shows the selected motor settings.");
       adopt(ikList[0]);
     } else {
-      const reason = result.exceptional?.length ? "A continuous inverse family exists. See its free coordinate below." : families.length ? "No solution at the current M2. Inspect the position families below for other M2 settings." : "No assembly reaches this exact target. Drag with snapping on to pick a reachable position.";
+      let reason = "No assembly reaches this exact target. Drag with snapping on to pick a reachable position.";
+      if (result.solutions?.length) {
+        reason = "The selected crossing exclusions rule out every calculated solution.";
+      } else if (result.exceptional?.length) {
+        reason = "This target leaves a coordinate free. See the exceptional family conditions below.";
+      } else if (families.length) {
+        reason = "No solution at the current M2. Inspect the position families below for other M2 settings.";
+      }
       const msg = reason + (state.ok ? " The linkage holds its previous pose." : "");
       say(msg, true);
       html = '<p class="warning">' + esc(msg) + "</p>";
       queueDraw();
     }
     if (families.length) {
-      html += "<details><summary>Position families (" + families.length + ")</summary>" + families.map(f => "<p>M1 " + fmt(deg(f.q1), 5) + "°, J4 sign " + esc(f.s4) + "<br>" + familySummary(f) + "</p>").join("") + "</details>";
+      html += "<details><summary>Position families (" + families.length + ")</summary>" + families.map(f => "<p>M1 " + fmt(deg(f.q1), 5) + "°, J4 sign " + esc(f.s4) + (hinged ? ", δ " + fmt(deg(f.delta), 3) + "°" : "") + "<br>" + familySummary(f) + "</p>").join("") + "</details>";
     }
     if (result.exceptional?.length) {
-      html += "<details open><summary>Exceptional families (" + result.exceptional.length + ")</summary>" + result.exceptional.map(f => "<p>" + esc(f.kind) + " · free coordinate " + esc(f.coordinate || "free coordinate") + "</p>").join("") + "</details>";
+      html += "<details open><summary>Exceptional families (" + result.exceptional.length + ")</summary>" + result.exceptional.map(f => "<p>" + esc(f.kind) + " · free coordinate " + esc(f.coordinate || "unspecified") + (f.condition ? "<br>" + esc(f.condition) : "") + "</p>").join("") + "</details>";
     }
     if (result.diagnostics?.length) html += "<details><summary>Inverse diagnostics</summary>" + result.diagnostics.map(t => "<p>" + esc(typeof t === "string" ? t : JSON.stringify(t)) + "</p>").join("") + "</details>";
     $("ikResults").innerHTML = html;
@@ -401,6 +487,17 @@
     if (all && $("workspace").checked) {
       makeSamples();
       base.push(...samples.filter(s => s.pt).map(s => s.pt));
+      if (hingeDomain?.ok) {
+        const {JX, J4, intervals, events} = hingeDomain;
+        const incoming = direction(J4, JX);
+        const angles = events.map(event => incoming + event.delta);
+        for (const {lo, hi} of intervals) {
+          angles.push(incoming + lo, incoming + hi);
+          const quarter = Math.PI / 2;
+          for (let n = Math.ceil((incoming + lo) / quarter); n * quarter < incoming + hi; n++) angles.push(n * quarter);
+        }
+        for (const a of angles) base.push([JX[0] + p.c * Math.cos(a), JX[1] + p.c * Math.sin(a)]);
+      }
     }
     const xs = base.map(a => a[0]),
       ys = base.map(a => a[1]);
@@ -490,6 +587,22 @@
       }
     }
     if ($("workspace").checked) {
+      if (hingeDomain?.ok) {
+        const {JX, J4, intervals, events} = hingeDomain;
+        const incoming = direction(J4, JX), center = xy(JX);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#25877d";
+        for (const {lo, hi} of intervals) {
+          ctx.beginPath();
+          ctx.arc(...center, p.c * scale, -(incoming + lo), -(incoming + hi), true);
+          ctx.stroke();
+        }
+        for (const event of events) {
+          if (event.kind === "pair") continue;
+          const a = incoming + event.delta;
+          circle(xy([JX[0] + p.c * Math.cos(a), JX[1] + p.c * Math.sin(a)]), 3, "#25877d");
+        }
+      }
       makeSamples();
       ctx.strokeStyle = "#d28b44";
       ctx.lineWidth = 2.3;
@@ -564,7 +677,7 @@
       }
       arm("J3", "J4", "#233c44", "#415963", 5);
       arm("J4", "JX", "#213940", "#3e5861", 7);
-      arm("JX", "EE", "#213940", "#3e5861", 7);
+      arm("JX", "EE", isHinged() ? "#175e58" : "#213940", isHinged() ? "#3a8e81" : "#3e5861", 7);
       arm("EE", "J8", "#213940", "#3e5861", 6);
       zig("M1", "JX", "#476068");
       zig("M2", "J5", "#19779b");
@@ -602,6 +715,7 @@
           circle(P, 7, "#fffaec", "#985b27", 2.3);
           circle(P, 2.8, "#935322");
         } else {
+          if (k === "JX" && isHinged()) circle(P, 10.5, "#deeee7", "#25877d", 1.8);
           circle(P, k === "JX" ? 7.2 : 4.8, "#f9fbf8", col, 2);
           if (["J3", "M1", "M2", "JX"].includes(k)) circle(P, 2.2, col);
         }
@@ -654,20 +768,28 @@
       line([a[0] - 5, a[1] - 5], [a[0] + 5, a[1] + 5], "#a3472a", 1.8);
       line([a[0] - 5, a[1] + 5], [a[0] + 5, a[1] - 5], "#a3472a", 1.8);
     }
-    $("plotInfo").textContent = ($("workspace").checked ? "Dashed amber · sampled EE locus at current M2 and branch. Diamonds · detected closure tangencies. " : "") + ($("crossings").checked ? crossingInfo.length + " projected centerline crossing(s). " : "") + "Drag EE or click a target.";
+    const locus = isHinged()
+      ? "Teal arc shows possible EE positions as the hinge turns with both motors held. Dashed amber follows M1 with M2 and the hinge angle held. "
+      : "Dashed amber follows EE as M1 turns at the current M2 and branch. ";
+    $("plotInfo").textContent = ($("workspace").checked ? locus + "Diamonds mark sampled closure tangencies. " : "")
+      + (isHinged() && blockedPairs.size && $("workspace").checked ? "The teal arc shows geometric closure before crossing exclusions. " : "")
+      + ($("crossings").checked ? crossingInfo.length + " projected centerline crossing(s). " : "") + "Drag EE or click a target.";
   }
   function jointsPanel() {
     if (!state.ok) {
       $("joints").innerHTML = '<p class="warning">' + esc(state.reason) + "</p>";
       return;
     }
-    const z = state.points,
-      jointRows = pointNames.map(k => [k, fmt(z[k][0]), fmt(z[k][1])]);
-    const memberRows = spanDefs.map(([k, a, b]) => [k, a + " → " + b, fmt(dist(z[a], z[b])), dist(z[a], z[b]) ? fmt(deg(direction(z[a], z[b])), 2) : "undefined"]);
+    const z = state.points;
+    const extraDigits = $("calcDigits").checked;
+    const lengthDigits = extraDigits ? 3 : 0;
+    const angleDigits = extraDigits ? 4 : 1;
+    const jointRows = pointNames.map(k => [k, fmt(z[k][0], lengthDigits), fmt(z[k][1], lengthDigits)]);
+    const memberRows = spanDefs.map(([k, a, b]) => [k, a + " → " + b, fmt(dist(z[a], z[b]), lengthDigits), dist(z[a], z[b]) ? fmt(deg(direction(z[a], z[b])), angleDigits) : "undefined"]);
     const joints = [["J4", "J3", "J4", "JX"], ["J5", "M2", "J5", "J6"], ["J6", "J5", "J6", "JX"], ["J7", "JX", "J7", "J8"], ["J8", "J7", "J8", "EE"], ["EE", "JX", "EE", "J8"], ["JX · black", "J4", "JX", "EE"], ["JX · blue", "J6", "JX", "J7"], ["JX · input / black", "M1", "JX", "J4"], ["JX · black / blue", "J4", "JX", "J6"]];
-    const turns = joints.map(([k, a, b, c]) => [k, a + " → " + b + " → " + c, dist(z[a], z[b]) && dist(z[b], z[c]) ? fmt(deg(wrap(direction(z[b], z[c]) - direction(z[a], z[b]))), 3) : "undefined"]);
+    const turns = joints.map(([k, a, b, c]) => [k, a + " → " + b + " → " + c, dist(z[a], z[b]) && dist(z[b], z[c]) ? fmt(deg(wrap(direction(z[b], z[c]) - direction(z[a], z[b]))), angleDigits) : "undefined"]);
     const expanded = $("joints").querySelector("details")?.open;
-    $("joints").innerHTML = '<div class="data-grid"><div><h3>Joint coordinates</h3>' + table(["Joint", "X (mm)", "Y (mm)"], jointRows) + "</div><div><h3>Directed members</h3>" + table(["Link", "Direction", "mm", "Angle (°)"], memberRows) + "</div></div><details><summary>Joint angles and actuator inputs</summary>" + table(["Joint", "Incoming → outgoing", "Signed turn (°)"], turns) + table(["Drive", "Quantity", "Value"], [["M1", "Global angle (°)", fmt(deg(q1), 5)], ["M2", p.mode === "rotary" ? "Global angle (°)" : "Signed travel (mm)", fmt(p.mode === "rotary" ? deg(q2) : q2, 5)], ["EE", "Tool angle (°)", fmt(deg(state.phi), 5)]]) + "</details>";
+    $("joints").innerHTML = '<div class="data-grid"><div><h3>Joint coordinates</h3>' + table(["Joint", "X (mm)", "Y (mm)"], jointRows) + "</div><div><h3>Directed members</h3>" + table(["Link", "Direction", "mm", "Angle (°)"], memberRows) + "</div></div><details><summary>Joint angles and actuator inputs</summary>" + table(["Joint", "Incoming → outgoing", "Signed turn (°)"], turns) + table(["Drive", "Quantity", "Value"], [["M1", "Global angle (°)", fmt(deg(q1), angleDigits)], ["M2", p.mode === "rotary" ? "Global angle (°)" : "Signed travel (mm)", fmt(p.mode === "rotary" ? deg(q2) : q2, p.mode === "rotary" ? angleDigits : lengthDigits)], ["EE", "Tool angle (°)", fmt(deg(state.phi), angleDigits)]]) + "</details>";
     $("joints").querySelector("details").open = Boolean(expanded);
   }
 
@@ -675,10 +797,16 @@
   function rateFields() {
     const units = p.mode === "rotary" ? ["rad/s", "rad/s²"] : ["mm/s", "mm/s²"];
     const names = ["M1 rate · rad/s", "M2 rate · " + units[0], "M1 accel. · rad/s²", "M2 accel. · " + units[1], "Force X · N", "Force Y · N", "Moment · N·mm"];
-    const old = rateKeys.map(k => $(k)?.value || 0);
-    $("rateFields").innerHTML = '<div class="intro"><h2>Differential kinematics</h2><p>Set instantaneous input derivatives and an external wrench at EE. Angular quantities in this panel use radians.</p></div><div class="rategrid">' + rateKeys.map((k, i) => "<label>" + names[i] + '<input id="' + k + '" type="number" step="any" value="' + esc(old[i]) + '"></label>').join("") + "</div>";
-    rateKeys.forEach(k => $(k).addEventListener("input", () => {
+    const keys = [...rateKeys];
+    if (isHinged()) {
+      keys.push("dh", "ddh");
+      names.push("Passive hinge rate · rad/s", "Passive hinge accel. · rad/s²");
+    }
+    const old = keys.map(k => $(k)?.value || 0);
+    $("rateFields").innerHTML = '<div class="intro"><h2>Differential kinematics</h2><p>Set instantaneous rates, accelerations and the external load at EE. Angular quantities in this panel use radians.</p></div><div class="rategrid">' + keys.map((k, i) => "<label>" + names[i] + '<input id="' + k + '" type="number" step="any" value="' + esc(old[i]) + '"></label>').join("") + "</div>";
+    keys.forEach(k => $(k).addEventListener("input", () => {
       diff = null;
+      updateStatus();
       motionPanel();
     }));
   }
@@ -686,11 +814,15 @@
     if (!diff) {
       const a = rateKeys.map(k => $(k).valueAsNumber);
       if (!a.every(Number.isFinite)) return null;
-      diff = D.evaluate(p, state, {
-        rates: a.slice(0, 2),
-        accelerations: a.slice(2, 4),
-        wrench: a.slice(4)
-      });
+      const rates = a.slice(0, 2), accelerations = a.slice(2, 4);
+      if (isHinged()) {
+        const dh = $("dh").valueAsNumber, ddh = $("ddh").valueAsNumber;
+        if (!Number.isFinite(dh) || !Number.isFinite(ddh)) return null;
+        rates.push(dh);
+        accelerations.push(ddh);
+      }
+      const evaluate = isHinged() ? D.freeHinge : D.evaluate;
+      diff = evaluate(p, state, {rates, accelerations, wrench: a.slice(4)});
     }
     return diff;
   }
@@ -707,17 +839,35 @@
     const block = (title, body) => '<div class="block"><h3>' + esc(title) + "</h3>" + body + "</div>";
     const matList = entries => '<div class="matrix-grid">' + entries.map(([k, v]) => matrix(k, v)).join("") + "</div>";
     const details = (title, body) => "<details><summary>" + esc(title) + "</summary>" + body + "</details>";
-    let html = block("Constraint diagnostics", table(["Dependent rank / 3", "Full rank / 3", "Linearized mobility", "Locked nullity", "Pose rank"], [[d.rankH, d.rankConstraint, d.mobilityLinearized, d.lockedNullity, d.poseRank ?? "—"]]) + '<p class="subtle">' + (d.nearSingular ? "Near a closure singularity. " : "") + esc(d.reason || "") + "</p>");
+    let html = "";
+    if (d.freeHinge) {
+      const {J4, JX, EE} = state.points;
+      const turn = wrap(direction(JX, EE) - direction(J4, JX));
+      html += block("Passive hinge at JX", '<p>The selected turn δ from J4→JX to JX→EE is ' +
+        fmt(deg(turn), 3) + '°. At a regular closure, locking M1 and M2 leaves one free coordinate. ' +
+        'The motion values below use the specified hinge rate and acceleration. A measured hinge motion or a force model is needed to predict its motion under load.</p>');
+    }
+    html += block("Constraint diagnostics", table(["Dependent rank / 3", "Full rank / 3", "Linearized mobility", "Freedom with motors locked", "Pose rank"], [[d.rankH, d.rankConstraint, d.mobilityLinearized, d.lockedNullity, d.poseRank ?? "—"]]) + '<p class="subtle">' + (d.nearSingular ? "Near a closure singularity. " : "") + esc(d.reason || "") + "</p>");
     if (d.regular) {
-      html += block("Velocity and inverse mappings", matList([["Pose Jacobian · [x, y, φ] from q̇", d.poseJacobian], ["Pose left inverse · compatible twists", d.poseLeftInverse], ["Reduced Jacobian · [tangent speed, φ̇]", d.reducedJacobian], ["Reduced inverse", d.inverseReduced], ["Dependent angular Jacobian", d.dependentJacobian], ["XY pseudoinverse · minimum norm", d.positionPseudoInverse]]));
+      if (d.freeHinge) {
+        html += block("Velocity and inverse mappings", '<p class="subtle">Columns are M1, M2 and the passive hinge δ. The inverse gives all three rates required for a tool twist.</p>' +
+          matList([["Pose Jacobian · [x, y, φ] from [q̇₁, q̇₂, δ̇]", d.poseJacobian], ["Pose inverse · [q̇₁, q̇₂, δ̇] from tool twist", d.poseInverse], ["Dependent angular Jacobian", d.dependentJacobian]]));
+      } else {
+        html += block("Velocity and inverse mappings", matList([["Pose Jacobian · [x, y, φ] from q̇", d.poseJacobian], ["Pose left inverse · compatible twists", d.poseLeftInverse], ["Reduced Jacobian · [tangent speed, φ̇]", d.reducedJacobian], ["Reduced inverse", d.inverseReduced], ["Dependent angular Jacobian", d.dependentJacobian], ["XY pseudoinverse · minimum norm", d.positionPseudoInverse]]));
+      }
       html += block("Instantaneous output", table(["Quantity", "X", "Y", "φ"], [["Velocity · mm/s, rad/s", ...d.poseVelocity.map(precise)], ["Acceleration · mm/s², rad/s²", ...d.poseAcceleration.map(precise)]]));
       html += details("All joint velocities and accelerations", table(["Joint", "Vx", "Vy", "Ax", "Ay"], pointNames.map(k => [k, ...d.jointVelocity[k].map(precise), ...d.jointAcceleration[k].map(precise)])));
       html += details("Angular motion of each member", table(["Member", "ω (rad/s)", "α (rad/s²)"], Object.entries(d.memberMotion).map(([k, m]) => [k, precise(m.omega), precise(m.angularAcceleration)])));
       html += details("Joint and member velocity Jacobians", matList(Object.entries(d.pointJacobians)) + matList(Object.entries(d.memberJacobians).map(([k, v]) => [k, v ? [v] : null])));
-      html += details("Forces and velocity amplification", table(["Quantity", "M1", "M2"], [["External generalized effort", ...d.effort.map(precise)], ["Balancing actuator effort", ...d.balancingEffort.map(precise)]]) + '<p class="subtle">Rotary effort in N·mm, slider effort in N. Span force is positive in tension. Gains use model length ' + fmt(d.characteristicLength, 2) + " mm for scaling.</p>" + table(["Spanning link", "Axial force (N)"], Object.entries(d.spanAxialForces).map(([k, v]) => [k, precise(v)])) + matList([["Wrench → generalized effort", d.effortMap], ["Inverse reduced effort map", d.inverseEffortMap], ["Normalized velocity singular values", [d.reducedSingularValues]], ["Normalized force gains", d.normalizedForceGains ? [d.normalizedForceGains] : null]]));
-      html += details("Dimensional sensitivity at fixed drives", table(["Parameter", "∂x / ∂p", "∂y / ∂p", "∂φ / ∂p"], Object.entries(d.sensitivity).map(([k, v]) => [k, ...v.map(precise)])));
+      if (d.freeHinge) {
+        html += details("Applied wrench and passive hinge torque", table(["Quantity", "M1", "M2", "Passive δ"], [["Generalized load", ...d.effort.map(precise)]]) +
+          '<p class="subtle">Rotary loads use N·mm and slider loads use N. A nonzero load in the δ column requires an opposing hinge torque for static balance with the motors held.</p>' + matList([["Wrench → generalized load", d.effortMap]]));
+      } else {
+        html += details("Forces and velocity amplification", table(["Quantity", "M1", "M2"], [["External generalized effort", ...d.effort.map(precise)], ["Balancing actuator effort", ...d.balancingEffort.map(precise)]]) + '<p class="subtle">Rotary effort in N·mm, slider effort in N. Span force is positive in tension. Gains use model length ' + fmt(d.characteristicLength, 2) + " mm for scaling.</p>" + table(["Spanning link", "Axial force (N)"], Object.entries(d.spanAxialForces).map(([k, v]) => [k, precise(v)])) + matList([["Wrench → generalized effort", d.effortMap], ["Inverse reduced effort map", d.inverseEffortMap], ["Normalized velocity singular values", [d.reducedSingularValues]], ["Normalized force gains", d.normalizedForceGains ? [d.normalizedForceGains] : null]]));
+      }
+      html += details(d.freeHinge ? "Dimensional sensitivity at fixed drives and δ" : "Dimensional sensitivity at fixed drives", table(["Parameter", "∂x / ∂p", "∂y / ∂p", "∂φ / ∂p"], Object.entries(d.sensitivity).map(([k, v]) => [k, ...v.map(precise)])));
     }
-    html += details("Constraint Jacobians and derivatives", matList([["Dependent block H", d.H], ["Input block B", d.B], ["Full Jacobian [H B]", d.constraintJacobian], ["Normalized tangency indicators", [d.tangency]], ["Constraint rates", d.constraintRates ? [d.constraintRates] : null], ["Constraint accelerations", d.constraintAccelerations ? [d.constraintAccelerations] : null]]));
+    html += details("Constraint Jacobians and derivatives", matList([["Dependent block H", d.H], [d.freeHinge ? "Coordinate block B · [q₁, q₂, δ]" : "Input block B", d.B], ["Full Jacobian [H B]", d.constraintJacobian], ["Loop length residuals · 34, 56, 78 (mm)", [d.constraintResiduals]], ["Normalized tangency indicators", [d.tangency]], ["Constraint rates", d.constraintRates ? [d.constraintRates] : null], ["Constraint accelerations", d.constraintAccelerations ? [d.constraintAccelerations] : null]]));
     const currentFrame = $("frameSelect")?.value || "tool";
     html += block("Homogeneous frame transforms", '<label>Local frame <select class="text-select" style="width:auto" id="frameSelect">' + Object.keys(d.transforms).map(k => "<option " + (k === currentFrame ? "selected" : "") + ">" + esc(k) + "</option>").join("") + '</select></label><div id="frameData" class="block"></div>');
     const expanded = new Set([...$("motionData").querySelectorAll("details[open] > summary")].map(item => item.textContent));
@@ -741,7 +891,7 @@
         value = v == null ? "" : angles(key) ? deg(v).toPrecision(16) : v;
       return "<label>" + esc(label) + '<input type="number" step="any" name="' + key + '" value="' + esc(value) + '" ' + (key.endsWith("min") || key.endsWith("max") ? 'placeholder="unbounded"' : "required") + "></label>";
     }
-    const section = (title, arr) => "<fieldset><legend>" + title + '</legend><div class="geogrid">' + arr.map(field).join("") + "</div></fieldset>";
+    const section = (title, arr) => "<fieldset><legend>" + title + '</legend><div class="geogrid">' + arr.filter(([key]) => key !== "delta" || !isHinged()).map(field).join("") + "</div></fieldset>";
     form.innerHTML = '<label>M2 drive model<select name="mode" style="width:auto;max-width:300px"><option value="rotary" ' + (modeRot ? "selected" : "") + '>Rotary crank</option><option value="slider" ' + (!modeRot ? "selected" : "") + ">Prismatic guide</option></select></label>" + section("Ground points · mm", [["j3x", "J3 · x"], ["j3y", "J3 · y"], ["m1x", "M1 · x"], ["m1y", "M1 · y"], ["m2x", "M2 · x"], ["m2y", "M2 · y"]]) + section("Member dimensions · mm", labels) + section("Fixed angular offsets · degrees", [["delta", "J4→X to X→EE"], ["beta", "X→J6 to X→J7"], ["tool", "E→J8 to tool axis"], ["axis", "M2 slider guide"]]) + section("Optional operating bounds", [["q1min", "M1 lower · °"], ["q1max", "M1 upper · °"], ["q2min", "M2 lower"], ["q2max", "M2 upper"]]) + '<p class="subtle">M2 bounds use degrees for a rotary crank and mm for a slider. Blank bounds allow unrestricted input. Slider controls show an illustrative range; type any admissible travel.</p><button class="primary" type="submit">Apply geometry</button><span class="formmsg" id="geomsg" role="status"></span>';
   }
   function applyGeo(e) {
@@ -771,6 +921,7 @@
       for (const k of ["dq2", "ddq2"]) $(k).value = 0;
     }
     p = np;
+    if (!isHinged()) fixedBend = p.delta;
     traceBreak();
     clearTarget();
     sampleKey = "";
@@ -804,7 +955,10 @@
       if (r.ok && !matchesNumeric(r)) out += '<p class="warning">Converged to a distinct assembly or point discrepancy exceeds overlay tolerance. Overlay withheld.</p>';
     }
     $("compareData").innerHTML = out;
-    const notes = '<p class="subtle">The primary model treats the zigzag paths as effective fixed spans, with separate black and blue bodies rotating at JX. The right-hand dogleg has no enforced ground joint. EE xy lies on a curve; a reachable pose can also control tool orientation. Projected crossings identify possible interference because the drawing supplies no thickness or layer ordering.</p>';
+    const interpretation = isHinged()
+      ? "The black arms meet at a passive hinge. This numerical comparison conditions on the chosen hinge angle. It checks one member of the possible pose family."
+      : "The black arms form one rigid member. The EE pin follows a curve on each assembly branch.";
+    const notes = '<p class="subtle">' + interpretation + ' Both models hold the zigzag spans at their configured lengths and assume the right-hand mark adds no ground joint. Projected crossings depend on unknown link thickness and layer ordering.</p>';
     let html = '<div class="block"><h3>Model assumptions</h3>' + notes + "</div>" + crossingFilters();
     if (state.ok) html += '<div class="block"><h3>Analytical residuals</h3><p class="subtle">Acceptance tolerance ' + precise(K.tolerance(p)) + " mm.</p>" + table(["Constraint", "Residual (mm)"], Object.entries(state.residuals).map(([k, v]) => [k, precise(v)])) + '</div><div class="block"><h3>Projected centerline crossings</h3>' + (crossingInfo.length ? table(["Members", "X", "Y"], crossingInfo.map(c => [c.pair, ...c.xy.map(n => fmt(n))])) : '<p class="subtle">No strict interior crossings detected.</p>') + "</div>";else html += '<p class="notice warn">' + esc(state.reason) + "</p>";
     const wasOpen = $("exclusions")?.open;
@@ -897,7 +1051,7 @@
     }
     q1 = qbest;
     target = point;
-    say("Snapped to the reachable path at fixed M2. Pointer offset " + fmt(score, 3) + " mm.");
+    say((isHinged() ? "Snapped to the M1 path at fixed M2 and hinge angle." : "Snapped to the reachable path at fixed M2.") + " Pointer offset " + fmt(score, 3) + " mm.");
     refresh({
       keepMessage: true
     });
@@ -981,6 +1135,17 @@
     refresh();
   });
   $("fit").onclick = () => fit(true);
+  $("elbowModel").onchange = e => switchElbow(e.target.value);
+  $("hingeAngle").oninput = e => changeHinge(e.target.valueAsNumber);
+  $("hingeAngleN").onchange = e => {
+    if (Number.isFinite(e.target.valueAsNumber)) changeHinge(e.target.valueAsNumber);
+    else updateElbowControls();
+  };
+  $("calcDigits").onchange = () => {
+    updateElbowControls();
+    updateStatus();
+    drawInspection();
+  };
   for (const k of ["axes", "workspace", "crossings", "linkLabels", "trace"]) $(k).onchange = () => {
     if (k === "trace") trail = state.ok && $("trace").checked ? [state.points.EE] : [];
     queueDraw();
@@ -1017,7 +1182,7 @@
     playback = null;
     $("play").setAttribute("aria-pressed", "false");
     $("play").textContent = "▶ Play motor sweep";
-    for (const k of rateKeys.slice(0, 4)) {
+    for (const k of [...rateKeys.slice(0, 4), ...(isHinged() ? ["dh", "ddh"] : [])]) {
       $(k).value = 0;
       $(k).readOnly = false;
     }
@@ -1042,9 +1207,13 @@
       frame: 0
     };
     for (const k of rateKeys.slice(0, 4)) $(k).readOnly = true;
+    if (isHinged()) for (const k of ["dh", "ddh"]) {
+      $(k).value = 0;
+      $(k).readOnly = true;
+    }
     $("play").setAttribute("aria-pressed", "true");
     $("play").textContent = "Ⅱ Pause motor sweep";
-    say("Playing a cosine sweep from this pose. Both input derivatives are shown in Motion matrices.");
+    say(isHinged() ? "Sweeping the two motor inputs with the sampled hinge angle held constant." : "Sweeping the two motor inputs. The Motion matrices tab shows their rates.");
     function frame(now) {
       const run = playback;
       if (!run) return;
