@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Linkage workbench</title>
-    <link rel="stylesheet" href="style.css?v=3" />
+    <link rel="stylesheet" href="style.css?v=4" />
   </head>
   <body>
     <header class="mast">
@@ -34,32 +34,55 @@
     </header>
     <main>
       <section class="card model-bar" aria-label="Mechanism interpretation and display precision">
-        <div class="model-choice">
-          <label for="elbowModel">Black elbow at JX</label>
-          <select id="elbowModel" aria-describedby="elbowHelp">
-            <option value="fixed">Fixed bend</option>
-            <option value="hinged">Passive hinge</option>
-          </select>
+        <div class="model-choices">
+          <div class="model-choice black-elbow">
+            <label for="elbowModel">Black elbow at JX</label>
+            <select id="elbowModel" aria-describedby="elbowHelp blackAngleConvention">
+              <option value="fixed">Fixed bend</option>
+              <option value="hinged">Passive hinge</option>
+            </select>
+          </div>
+          <div class="model-choice blue-elbow">
+            <label for="blueElbowModel">Blue elbow at JX</label>
+            <select id="blueElbowModel" aria-describedby="elbowHelp blueAngleConvention">
+              <option value="fixed">Fixed bend</option>
+              <option value="hinged">Passive hinge</option>
+            </select>
+          </div>
         </div>
         <div class="model-help">
-          <p id="elbowHelp">J4–JX–EE is one rigid body. On a chosen assembly branch, M1 sets the end-effector position along a curve and M2 changes the tool heading.</p>
+          <p id="elbowHelp" aria-live="polite">Both bends are fixed. On a chosen assembly branch, M1 sets the end-effector position along a curve and M2 changes the tool heading.</p>
           <details class="model-evidence">
             <summary>How could we tell which model fits?</summary>
-            <p>In a side-on recording, hold M1 still and move M2. Track the centers of J4, JX and the EE pin. If J4 and JX stay in place while EE shifts beyond measurement error, the black bend changes. A stationary EE is compatible with either model if the load or friction holds a free hinge still.</p>
+            <p>In a side-on recording, track J4, JX and EE for the black elbow, and J6, JX and J7 for the blue elbow. If either angle changes beyond measurement uncertainty, that bend moves. If it stays constant, a fixed bend and a passive hinge held by load or friction can look alike.</p>
           </details>
         </div>
         <div class="precision-panel">
           <p id="precisionNote"><strong>Sketch-based dimensions.</strong> Positions and angles are rounded model predictions. Physical accuracy requires measurements of the mechanism.</p>
           <label class="check"><input id="calcDigits" type="checkbox" aria-describedby="precisionNote" />Show extra calculation digits</label>
         </div>
-        <div id="hingeControls" class="hinge-controls" hidden>
-          <div class="hinge-input">
-            <label for="hingeAngleN">Passive hinge angle (°)</label>
-            <input id="hingeAngleN" type="number" step="any" min="-180" max="180" aria-describedby="hingeDomain" />
-            <input id="hingeAngle" type="range" min="-180" max="180" step="any" aria-label="Passive hinge angle in degrees" aria-describedby="hingeDomain" />
+        <div class="angle-conventions" aria-label="Angle conventions">
+          <span>Positive angles turn counterclockwise.</span>
+          <span id="blackAngleConvention"><strong>Black</strong> J4→JX to JX→EE.</span>
+          <span id="blueAngleConvention"><strong>Blue</strong> JX→J6 to JX→J7.</span>
+        </div>
+        <div class="hinge-samples">
+          <div id="hingeControls" class="hinge-controls black-elbow" hidden>
+            <div class="hinge-input">
+              <label for="hingeAngleN">Black hinge angle (°)</label>
+              <input id="hingeAngleN" type="number" step="any" min="-180" max="180" aria-describedby="blackAngleConvention hingeDomain" />
+              <input id="hingeAngle" type="range" min="-180" max="180" step="any" aria-label="Black passive hinge sample in degrees" aria-describedby="blackAngleConvention hingeDomain" />
+            </div>
+            <p id="hingeDomain" class="hinge-domain" aria-live="polite"></p>
           </div>
-          <p class="hinge-convention">Positive angles turn counterclockwise from J4→JX to JX→EE.</p>
-          <p id="hingeDomain" class="hinge-domain" aria-live="polite"></p>
+          <div id="blueHingeControls" class="hinge-controls blue-elbow" hidden>
+            <div class="hinge-input">
+              <label for="blueHingeAngleN">Blue hinge angle (°)</label>
+              <input id="blueHingeAngleN" type="number" step="any" min="-180" max="180" aria-describedby="blueAngleConvention blueHingeDomain" />
+              <input id="blueHingeAngle" type="range" min="-180" max="180" step="any" aria-label="Blue passive hinge sample in degrees" aria-describedby="blueAngleConvention blueHingeDomain" />
+            </div>
+            <p id="blueHingeDomain" class="hinge-domain" aria-live="polite"></p>
+          </div>
         </div>
       </section>
       <section class="bench">
@@ -168,6 +191,10 @@
               <p id="hingeInverseHelp" class="subtle" hidden>Exact X and Y determine possible M1 and passive hinge angles at the current M2.
                 Include a tool angle to solve for M2 as well. Each result gives the passive hinge angle the pose requires. The two motors alone cannot select that angle.
                 Drag with snapping on to follow the amber path at fixed M2 and hinge angle, or turn snapping off to pick an exact target.</p>
+              <p id="blueInverseHelp" class="subtle" hidden>With the blue hinge free, this solve holds M2 at its displayed setting.
+                X and Y give admissible blue angles β. Add a tool angle to solve for β on this slice.
+                <span id="bothInverseHelp">The solve also recovers the black angle δ.</span>
+                Change M2 in Forward to explore another slice. Snapped dragging holds the sampled bends fixed.</p>
               <div class="fields target-fields">
                 <label>X <small>mm</small><input id="tx" type="number" step="any" /></label
                 ><label>Y <small>mm</small><input id="ty" type="number" step="any" /></label>
@@ -178,7 +205,8 @@
               /></label>
               <button id="solve" class="primary">Solve exact target</button>
               <p class="mini"><strong>Displayed motors</strong><br /><output id="inverseMotors" aria-live="off"></output>
-                <span id="inverseHingeRow" hidden><br />Passive JX angle δ · <output id="inverseHinge" aria-live="off"></output></span></p>
+                <span id="inverseHingeRow" hidden><br />Passive black angle δ · <output id="inverseHinge" aria-live="off"></output></span>
+                <span id="inverseBlueRow" hidden><br />Passive blue angle β · <output id="inverseBlue" aria-live="off"></output></span></p>
               <div id="ikResults" class="mini"></div>
             </div>
             <div class="assembly-settings">
@@ -270,9 +298,10 @@
         </div>
       </section>
     </main>
-    <script src="kinematics.js?v=3"></script>
-    <script src="differential.js?v=3"></script>
-    <script src="numerical.js?v=3"></script>
-    <script src="app.js?v=3"></script>
+    <script src="kinematics.js?v=4"></script>
+    <script src="blue-inverse.js?v=4"></script>
+    <script src="differential.js?v=4"></script>
+    <script src="numerical.js?v=4"></script>
+    <script src="app.js?v=4"></script>
   </body>
 </html>

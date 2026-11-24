@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1300" height="860" viewBox="0 0 1300 860" role="img" aria-labelledby="title desc">
+  <title id="title">Passive blue elbow at JX</title>
+  <desc id="desc">M1 drives JX. The black rigid member joins J4, JX and EE. The separate blue members J6–JX and JX–J7 are pin-jointed at JX. Their relative angle is passive. M2 drives J5; the J5–J6 and J7–J8 spans and the EE–J8 terminal bar close the blue chain. A dashed ochre trace shows the unidentified mark near the terminal bar. All dimensions are symbolic.</desc>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" fill="#d6dcd9"/></pattern>
+    <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse">
+      <path d="M-2,2 L2,-2 M0,7 L7,0 M5,9 L9,5" stroke="#788781" stroke-width="1.3"/>
+    </pattern>
+    <g id="ground">
+      <path d="M0,-5 L-17,17 L17,17 Z" fill="#fffdf7" stroke="#344542" stroke-width="2.2"/>
+      <rect x="-24" y="18" width="48" height="9" fill="url(#hatch)"/>
+      <path d="M-24 18 H24" fill="none" stroke="#344542" stroke-width="2.4"/>
+    </g>
+    <g id="pin">
+      <circle r="9" stroke="currentColor" fill="#fffdf7" stroke-width="3.3"/>
+      <circle r="2.6" fill="currentColor"/>
+    </g>
+    <g id="motor">
+      <circle r="12" stroke="currentColor" fill="#fffdf7" stroke-width="3.2"/>
+      <circle r="6.7" fill="currentColor"/>
+    </g>
+    <marker id="arrow" viewBox="0 0 10 10" markerWidth="6" markerHeight="6" refX="8.7" refY="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 L2.5 5 Z" fill="#54645e"/></marker>
+    <marker id="blueArrow" viewBox="0 0 10 10" markerWidth="6" markerHeight="6" refX="8.7" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 L2.5 5 Z" fill="#21669b"/></marker>
+    <style>
+      text {font-family:"DejaVu Sans",sans-serif; fill:#24332f;}
+      .caption {font-size:17px; fill:#56655f;}
+      .meta {font-family:"DejaVu Sans Mono",monospace; font-size:13px; letter-spacing:1.1px; fill:#5a6a64;}
+      .joint {font-size:20px; font-weight:bold; paint-order:stroke; stroke:#fbfbf6; stroke-width:5px; stroke-linejoin:round;}
+      .blue {fill:#21669b; color:#21669b;}
+      .black {color:#283734;}
+      .span {font-family:"DejaVu Sans Mono",monospace; font-size:16px; font-weight:normal; paint-order:stroke; stroke:#fbfbf6; stroke-width:5px; stroke-linejoin:round;}
+      .angle {font-family:"DejaVu Sans",sans-serif; font-style:italic; font-size:18px; paint-order:stroke; stroke:#fbfbf6; stroke-width:4px;}
+      .tech {font-size:15px; fill:#485951; paint-order:stroke; stroke:#fbfbf6; stroke-width:4px;}
+      .heads {font-weight:bold; font-size:17px;}
+      .notes {font-size:15px; fill:#4a5953;}
+      .ink,.construct,.trace,.arm,.rod {stroke-linejoin:round; stroke-linecap:round; fill:none;}
+      .construct {stroke:#66776e; stroke-width:1.4; stroke-dasharray:5 4;}
+      .arm {stroke:#2c3935; stroke-width:10;}
+      .rod {stroke:#21669b; stroke-width:5;}
+      .trace {stroke:#a07137; stroke-width:2.1; stroke-dasharray:6 5;}
+    </style>
+  </defs>
+
+  <rect width="1300" height="860" fill="#fbfbf6"/>
+  <text x="47" y="65" font-size="41" font-weight="bold" letter-spacing="-1.4">Passive blue elbow at JX</text>
+  <text x="48" y="101" class="caption">Rotary M2 configuration with three closed loops, two motors and three generic degrees of freedom.</text>
+  <text x="1250" y="64" text-anchor="end" class="meta">SYMBOLIC DIMENSIONS</text>
+  <text x="1250" y="88" text-anchor="end" class="meta">SCHEMATIC PROPORTIONS</text>
+  <rect x="36" y="126" width="1228" height="526" rx="4" fill="url(#dots)" stroke="#c6ceca"/>
+
+  <!-- Global basis is shown without implying a coordinate origin at this corner. -->
+  <g transform="translate(92 237)" class="ink" stroke="#54645e" stroke-width="1.6" marker-end="url(#arrow)">
+    <path d="M0 0 H51"/><path d="M0 0 V-47"/>
+  </g>
+  <text x="151" y="241" class="angle">x</text><text x="87" y="180" class="angle">y</text>
+
+  <!-- home assembly -->
+  <use xlink:href="#ground" class="black" transform="translate(145.00 581.00)"/>
+  <use xlink:href="#ground" class="black" transform="translate(289.14 581.00)"/>
+  <use xlink:href="#ground" class="black" transform="translate(389.82 581.00)"/>
+  <path d="M145.00 581.00 L540.99 180.95" class="arm" style="stroke-width:6"/>
+  <path d="M389.82 581.00 L637.09 322.81" class="arm" style="stroke-width:5"/>
+  <path d="M540.99 180.95 L637.09 322.81 L969.82 545.54" class="arm"/>
+  <path d="M969.82 545.54 L1070.50 420.84" class="arm" style="stroke-width:7"/>
+  <path d="M289.14 581.00 L297.15 403.68 L518.11 289.63" fill="none" stroke="#fbfbf6" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M289.14 581.00 L297.15 403.68 L518.11 289.63" class="rod"/>
+  <!-- Proximal and distal blue members lie on separate pin planes. -->
+  <path d="M518.11 289.63 L637.09 322.81" class="rod" style="stroke-width:9"/>
+  <path d="M637.09 322.81 L701.15 204.98" class="rod" style="stroke-width:9;stroke:#4d81a5"/>
+  <path d="M701.15 204.98 L1070.50 420.84" class="rod"/>
+  <path d="M637.09 322.81 L693.17 405.60" class="construct"/>
+  <path d="M670.18 371.66 A59 59 0 0 0 686.12 355.63" class="ink" stroke="#54645e" stroke-width="1.7" marker-end="url(#arrow)"/>
+  <text transform="translate(693.52 385.93)" class="angle" >δ</text>
+  <path d="M590.85 309.92 A48 48 0 0 1 660.02 280.64" class="ink" stroke="#21669b" stroke-width="1.7" marker-end="url(#blueArrow)"/>
+  <path d="M629 241 L623 261" fill="none" stroke="#4d81a5" stroke-width="1.3"/>
+  <text x="594" y="235" class="tech" style="fill:#21669b">Passive β</text>
+  <path d="M389.82 581.00 L456.82 581.00" class="construct"/>
+  <path d="M437.82 581.00 A48 48 0 0 0 423.02 546.33" class="ink" stroke="#54645e" stroke-width="1.7" marker-end="url(#arrow)"/>
+  <text transform="translate(445.00 561.44)" class="angle" >q₁</text>
+  <path d="M289.14 581.00 L349.14 581.00" class="construct"/>
+  <path d="M330.14 581.00 A41 41 0 0 0 290.99 540.04" class="ink" stroke="#21669b" stroke-width="1.7" marker-end="url(#blueArrow)"/>
+  <text transform="translate(327.46 548.38)" class="angle blue" >q₂</text>
+  <path d="M1022.17 480.69 L1079.17 517.69 L1079.17 550.69" class="trace"/>
+  <path d="M1063.17 550.69 L1096.17 550.69" class="trace"/>
+  <path d="M1082.17 530.69 L1102.17 510.69 L1117.17 510.69" class="ink" stroke="#a07137" stroke-width="1.4"/>
+  <text transform="translate(1125.17 506.69)" class="tech" style="fill:#815d31">Unresolved</text>
+  <text transform="translate(1125.17 527.69)" class="tech" style="fill:#815d31">support mark</text>
+  <path d="M969.82 545.54 L969.82 620.54" class="ink" stroke="#54645e" stroke-width="2.2" marker-end="url(#arrow)"/>
+  <text transform="translate(985.82 613.54)" class="tech" >Tool axis</text>
+  <use xlink:href="#pin" class="black" transform="translate(145.00 581.00)"/>
+  <use xlink:href="#pin" class="black" transform="translate(540.99 180.95)"/>
+  <use xlink:href="#motor" class="black" transform="translate(389.82 581.00)"/>
+  <use xlink:href="#pin" class="black" transform="translate(969.82 545.54)"/>
+  <use xlink:href="#motor" class="blue" transform="translate(289.14 581.00)"/>
+  <use xlink:href="#pin" class="blue" transform="translate(297.15 403.68)"/>
+  <use xlink:href="#pin" class="blue" transform="translate(518.11 289.63)"/>
+  <use xlink:href="#pin" class="blue" transform="translate(701.15 204.98)"/>
+  <use xlink:href="#pin" class="blue" transform="translate(1070.50 420.84)"/>
+  <circle cx="637.09" cy="322.81" r="16" fill="#fbfbf6" stroke="#2c3935" stroke-width="3"/>
+  <circle cx="637.09" cy="322.81" r="9.5" fill="none" stroke="#4d81a5" stroke-width="1.35"/>
+  <circle cx="637.09" cy="322.81" r="6.3" fill="none" stroke="#21669b" stroke-width="2.4"/>
+  <circle cx="637.09" cy="322.81" r="2.8" fill="#2c3935" stroke="none" stroke-width="0"/>
+  <text transform="translate(133.00 634.00)" class="joint" >J3</text>
+  <text transform="translate(272.14 634.00)" class="joint blue" >M2</text>
+  <text transform="translate(374.82 634.00)" class="joint" >M1</text>
+  <text transform="translate(505.99 171.95)" class="joint" >J4</text>
+  <text transform="translate(253.15 398.68)" class="joint blue" >J5</text>
+  <text transform="translate(484.11 277.63)" class="joint blue" >J6</text>
+  <text transform="translate(697.15 183.98)" class="joint blue" >J7</text>
+  <text transform="translate(1085.50 422.84)" class="joint blue" >J8</text>
+  <text transform="translate(659.09 316.81)" class="joint" >JX</text>
+  <text transform="translate(926.82 563.54)" class="joint" >EE</text>
+  <text transform="translate(409.00 295.82) rotate(-45.29)" class="span" text-anchor="middle">L₃₄</text>
+  <text transform="translate(275.96 518.22) rotate(-87.41)" class="span blue" text-anchor="middle">L₂₅</text>
+  <text transform="translate(456.58 343.90) rotate(-27.30)" class="span blue" text-anchor="middle">L₅₆</text>
+  <text transform="translate(523.67 471.59) rotate(-46.24)" class="span" text-anchor="middle">L₁ₓ</text>
+  <text transform="translate(583.07 214.54) rotate(55.89)" class="span" text-anchor="middle">L₄ₓ</text>
+  <text transform="translate(563.36 325.09) rotate(15.58)" class="span blue" text-anchor="middle">L₆ₓ</text>
+  <text transform="translate(684.37 279.82) rotate(-61.47)" class="span blue" text-anchor="middle">Lₓ₇</text>
+  <text transform="translate(903.46 308.16) rotate(30.30)" class="span blue" text-anchor="middle">L₇₈</text>
+  <text transform="translate(818.45 426.16) rotate(33.80)" class="span" text-anchor="middle">Lₓₑ</text>
+  <text transform="translate(1018.56 461.30) rotate(-51.08)" class="span" text-anchor="middle">Lₑ₈</text>
+
+  <g transform="translate(48 692)">
+    <path d="M0 -5 H40" stroke="#2c3935" stroke-width="6" stroke-linecap="round"/>
+    <text x="54" y="0" class="heads">Black position linkage</text>
+    <text y="35" class="notes">M1 sets the JX position. The rigid J4–JX–EE member</text>
+    <text y="57" class="notes">carries the end-effector point at a fixed bend δ.</text>
+    <text y="106" class="notes">With M1 and its black assembly fixed, EE position is fixed.</text>
+  </g>
+  <path d="M647 679 V820" stroke="#c6ceca"/>
+  <g transform="translate(680 692)">
+    <path d="M0 -5 H40" stroke="#21669b" stroke-width="6" stroke-linecap="round"/>
+    <text x="54" y="0" class="heads">Two blue links at JX</text>
+    <text y="35" class="notes">J6–JX and JX–J7 turn independently about the shared pin.</text>
+    <text y="57" class="notes">At fixed motor inputs, β changes the terminal heading.</text>
+    <text y="79" class="notes">The illustrated heading uses one admissible value of β.</text>
+    <text y="121" class="notes">The ochre mark has unknown function in the source drawing.</text>
+  </g>
+</svg>

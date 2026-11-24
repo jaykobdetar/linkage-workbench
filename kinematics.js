@@ -597,10 +597,10 @@
       );
     return result;
   }
-  // Release the J4→JX / JX→EE bend. Fixing both drive readings and an
-  // assembly side fixes J4 and J7. EE can rotate about JX until the J8
-  // pin triangle reaches internal or external tangency.
-  function hingeDomain(p, q1, q2, branch = home.branch, freeAngles = {}) {
+  // Hold the two drives and the other elbow's bend fixed. Either EE or J7
+  // moves around JX; the J8 closure exists exactly when the distance between
+  // these two points lies in [|h-g|,h+g]. Partition the circle at both bounds.
+  function bendDomain(p, q1, q2, branch, freeAngles, coordinate) {
     const empty = { intervals: [], events: [] };
     if (!Array.isArray(branch) || branch.length !== 3 || !branch.every((s) => s === -1 || s === 1))
       return { ...empty, ...failure("invalid", "branch", "A branch must contain three signs (+1 or −1).") };
@@ -608,44 +608,57 @@
     if (!B.ok) return { ...empty, ...B };
     if (!inBounds(q2, p.q2min, p.q2max, p.mode === "rotary" ? 2e-12 : tolerance(p)))
       return { ...empty, ...failure("limit", "actuator", "M2 is outside its configured limits.") };
-    const X = B.JX;
-    const J5 = atM2(p, q2);
+    const X = B.JX, J5 = atM2(p, q2);
     const blue = pick(X, p.d, J5, p.f, branch[1], "J6", freeAngles);
-    if (!blue.ok) return { ...empty, ...blue, JX: X, J4: B.J4, J5 };
-    const J7 = add(X, turn(sub(blue.point, X), p.beta, p.e / p.d));
-    const arm = sub(X, B.J4);
+    if (!blue.ok) return { ...empty, ...blue, JX: X, J4: B.J4, EE: B.EE, J5 };
+    const blueArm = sub(blue.point, X);
+    const J7 = add(X, turn(blueArm, p.beta, p.e / p.d));
+    const sweepBlue = coordinate === "beta";
+    const arm = sweepBlue ? blueArm : sub(X, B.J4);
+    const radius = sweepBlue ? p.e : p.c;
+    const ratio = sweepBlue ? p.e / p.d : p.c / p.b;
+    const fixed = sweepBlue ? B.EE : J7;
     const baseAngle = arg(arm);
-    // Use the identical floating-point reconstruction as forward(), including at a tangent.
-    const tipAt = (delta) => add(X, turn(arm, delta, p.c / p.b));
     const cuts = [-Math.PI, Math.PI];
     for (const reach of [Math.abs(p.h - p.g), p.h + p.g]) {
-      for (const E of discrete(circles(X, p.c, J7, reach)))
-        cuts.push(wrap(arg(sub(E, X)) - baseAngle));
+      for (const point of discrete(circles(X, radius, fixed, reach)))
+        cuts.push(wrap(arg(sub(point, X)) - baseAngle));
     }
     cuts.sort((a, b) => a - b);
     const angles = cuts.filter((v, i) => i === 0 || v - cuts[i - 1] > 128 * EPS);
     // Keep the fundamental domain's end even when an event is at the seam.
     angles[angles.length - 1] = Math.PI;
-    const kindAt = (v) => circles(tipAt(v), p.h, J7, p.g).kind;
+    function kindAt(angle) {
+      const tip = add(X, turn(arm, angle, ratio));
+      // Match forward's use of EE as the first circle center at boundary events.
+      return sweepBlue ? circles(fixed, p.h, tip, p.g).kind : circles(tip, p.h, fixed, p.g).kind;
+    }
     const events = [], intervals = [];
     for (let i = 0; i < angles.length; i++) {
-      const delta = angles[i], kind = kindAt(delta);
-      if (kind !== "none") events.push({ delta, kind });
+      const angle = angles[i], kind = kindAt(angle);
+      if (kind !== "none") events.push({ [coordinate]: angle, kind });
       if (i === 0) continue;
-      const lo = angles[i - 1], hi = delta;
+      const lo = angles[i - 1], hi = angle;
       if (kindAt((lo + hi) / 2) !== "none") intervals.push({ lo, hi });
     }
-    const geometry = { JX: X, J4: B.J4, J5, J6: blue.point, J7 };
+    const geometry = { JX: X, J4: B.J4, J5, J6: blue.point, J7, EE: B.EE };
     if (!intervals.length && !events.length)
       return { ...empty, ...geometry, ...failure("unreachable", "J8", "No bend angle closes the terminal pin.") };
     return { ok: true, intervals, events, ...geometry };
   }
 
-  // Position fixes the circles |X−M1|=r1, |X−E|=c. Every compatible J4
-  // determines one bend angle. At that angle the downstream inverse problem
-  // is exactly the existing closed-chain problem with a known black assembly.
-  function hingeInverse(p, target) {
-    const out = { solutions: [], families: [], diagnostics: [], exceptional: [] };
+  function hingeDomain(p, q1, q2, branch = home.branch, freeAngles = {}) {
+    return bendDomain(p, q1, q2, branch, freeAngles, "delta");
+  }
+
+  function blueHingeDomain(p, q1, q2, branch = home.branch, freeAngles = {}) {
+    return bendDomain(p, q1, q2, branch, freeAngles, "beta");
+  }
+
+  // Resolve the black subsystem alone, without imposing an angular law at
+  // the blue bend or requiring a compatible distal transmission.
+  function blackTargetCandidates(p, target, freeBlack = false) {
+    const out = { candidates: [], diagnostics: [], exceptional: [] };
     const invalid = validParams(p);
     if (invalid) {
       out.diagnostics.push(invalid);
@@ -659,6 +672,24 @@
     }
     const E = [target.x, target.y];
     const { M1, J3 } = basePoints(p);
+    if (!freeBlack) {
+      const { candidates, diagnostics, exceptional } = out;
+      const raw = blackInverse(p, E, diagnostics, exceptional);
+      const q1 = target.q1 ?? (p.q1min != null && p.q1min === p.q1max ? p.q1min : null);
+      if (exceptional.some((f) => f.kind === "black-angle") && Number.isFinite(q1)) {
+        const X = add(M1, mul(unit(q1), p.r1));
+        const J4 = sub(X, turn(sub(E, X), -p.delta, p.b / p.c));
+        raw.push({ q1, s4: turnSign(J3, X, J4, p.a), blackAngle: arg(sub(J4, J3)) });
+      }
+      for (const shape of raw) {
+        const B = black(p, shape.q1, shape.s4 || 1, { J4: shape.blackAngle });
+        if (B.ok && distance(B.EE, E) <= 2 * tolerance(p))
+          candidates.push({ ...B, delta: p.delta });
+      }
+      if (!candidates.length && !exceptional.length)
+        diagnostics.push("Target misses the fixed black coupler or its configured M1 limits.");
+      return out;
+    }
     const centers = circles(M1, p.r1, E, p.c);
     const motor1 = [];
     if (centers.kind === "continuum") {
@@ -689,13 +720,27 @@
       for (const J4 of positions) {
         const delta = wrap(arg(sub(E, X)) - arg(sub(X, J4)));
         const fixed = { ...p, delta };
-        const known = { q1, s4: turnSign(J3, X, J4, p.a), blackAngle: arg(sub(J4, J3)) };
-        const result = inverse(fixed, target, known);
-        for (const key of ["solutions", "families", "exceptional"])
-          for (const entry of result[key]) out[key].push({ ...entry, delta });
+        const B = black(fixed, q1, turnSign(J3, X, J4, p.a) || 1, { J4: arg(sub(J4, J3)) });
+        if (B.ok && distance(B.EE, E) <= 2 * tolerance(p))
+          out.candidates.push({ ...B, delta });
       }
     }
-    if (!out.solutions.length && !out.families.length && !out.exceptional.length)
+    if (!out.candidates.length && !out.exceptional.length)
+      out.diagnostics.push("No free black elbow satisfies the target and M1 limits.");
+    return out;
+  }
+
+  // With each recovered black bend fixed, use the original blue assembly
+  // inverse on that member of the moving-black-elbow family.
+  function hingeInverse(p, target) {
+    const blackResult = blackTargetCandidates(p, target, true);
+    const out = { solutions: [], families: [], diagnostics: blackResult.diagnostics, exceptional: blackResult.exceptional };
+    for (const B of blackResult.candidates) {
+      const result = inverse({ ...p, delta: B.delta }, target, B);
+      for (const key of ["solutions", "families", "exceptional"])
+        for (const entry of result[key]) out[key].push({ ...entry, delta: B.delta });
+    }
+    if (!out.solutions.length && !out.families.length && !out.exceptional.length && !out.diagnostics.length)
       out.diagnostics.push("No free-hinge assembly satisfies the target, pin closures and actuator limits.");
     for (const item of out.exceptional)
       if (item.condition && !out.diagnostics.includes(item.condition)) out.diagnostics.push(item.condition);
@@ -718,6 +763,8 @@
     black,
     familyDomain,
     hingeDomain,
+    blueHingeDomain,
+    blackTargetCandidates,
     hingeInverse,
   });
 });

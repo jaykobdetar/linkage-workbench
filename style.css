@@ -101,15 +101,26 @@ main {
 }
 .model-bar {
   display: grid;
-  grid-template-columns: minmax(155px, 200px) minmax(200px, 1.3fr) minmax(240px, 1fr);
-  gap: 10px 22px;
+  grid-template-columns: minmax(248px, 0.95fr) minmax(195px, 1.25fr) minmax(205px, 1fr);
+  gap: 8px 20px;
   align-items: center;
   margin-bottom: 14px;
   padding: 14px 20px;
 }
+.model-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
 .model-choice {
   display: grid;
   gap: 5px;
+}
+.black-elbow {
+  --elbow-color: #273c45;
+}
+.blue-elbow {
+  --elbow-color: #247cab;
 }
 .model-choice label,
 .hinge-input label {
@@ -126,9 +137,12 @@ main {
   border-radius: 4px;
   background: #fff;
 }
+.model-choice select {
+  border-left: 3px solid var(--elbow-color);
+}
 .model-help,
 .precision-panel p,
-.hinge-convention,
+.angle-conventions,
 .hinge-domain,
 .residual-note {
   font-size: 12px;
@@ -156,24 +170,42 @@ main {
 .precision-panel .check {
   margin-top: 5px;
 }
-.hinge-controls {
+.angle-conventions,
+.hinge-samples {
   grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+.angle-conventions strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+.hinge-samples {
+  gap: 10px 24px;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
+  padding-top: 9px;
+}
+.hinge-samples:not(:has(> :not([hidden]))) {
+  display: none;
+}
+.hinge-controls {
+  flex: 1 1 290px;
+  min-width: 0;
 }
 .hinge-input {
   display: grid;
-  grid-template-columns: max-content 75px minmax(110px, 270px);
+  grid-template-columns: max-content 75px minmax(45px, 220px);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .hinge-input input[type="range"] {
+  width: 100%;
   margin: 0;
-}
-.hinge-convention {
-  margin-top: 5px;
+  accent-color: var(--elbow-color);
 }
 .hinge-domain {
+  margin-top: 4px;
   color: var(--ink);
   overflow-wrap: anywhere;
 }
@@ -183,7 +215,7 @@ main {
 }
 @media (max-width: 800px) {
   .model-bar {
-    grid-template-columns: minmax(140px, 185px) minmax(0, 1fr);
+    grid-template-columns: minmax(248px, 0.9fr) minmax(0, 1.1fr);
     gap: 10px 15px;
     padding: 13px 15px;
   }
@@ -191,20 +223,9 @@ main {
     grid-column: 1 / -1;
   }
 }
-@media (max-width: 520px) {
+@media (max-width: 590px) {
   .model-bar {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .model-choice {
-    grid-template-columns: max-content minmax(0, 1fr);
-    align-items: center;
-    gap: 12px;
-  }
-  .hinge-input {
-    grid-template-columns: minmax(0, 1fr) 75px;
-  }
-  .hinge-input input[type="range"] {
-    grid-column: 1 / -1;
   }
 }
 .bench {

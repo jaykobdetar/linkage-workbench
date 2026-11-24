@@ -97,6 +97,39 @@
     }
     return rows.map(row => row.slice(3));
   }
+  // One-sided Jacobi SVD applied to the three columns of the transposed
+  // normalized pose Jacobian. This avoids squaring the condition number.
+  function poseSpectrum(matrix) {
+    const columns = matrix.map(row => row.slice());
+    const left = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    function rotatePair(vectors, p, q, cosine, sine) {
+      const a = vectors[p], b = vectors[q];
+      vectors[p] = a.map((x, i) => cosine * x - sine * b[i]);
+      vectors[q] = b.map((y, i) => sine * a[i] + cosine * y);
+    }
+    for (let sweep = 0; sweep < 20; sweep++) {
+      let changed = false;
+      for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+        const a = columns[p], b = columns[q];
+        const ab = a.reduce((sum, x, i) => sum + x * b[i], 0);
+        const na = Math.hypot(...a), nb = Math.hypot(...b);
+        if (Math.abs(ab) <= 8 * Number.EPSILON * na * nb) continue;
+        const tau = ((nb - na) * (nb + na)) / (2 * ab);
+        const t = (tau < 0 ? -1 : 1) / (Math.abs(tau) + Math.hypot(1, tau));
+        const cosine = 1 / Math.hypot(1, t), sine = t * cosine;
+        rotatePair(columns, p, q, cosine, sine);
+        rotatePair(left, p, q, cosine, sine);
+        changed = true;
+      }
+      if (!changed) break;
+    }
+    const singular = columns.map(col => Math.hypot(...col));
+    const threshold = EPS_RANK * Math.max(1, ...singular);
+    const retained = singular.map(x => x > threshold);
+    const pseudo = columns[0].map((_, i) => left[0].map((_, j) =>
+      singular.reduce((sum, s, k) => retained[k] ? sum + (columns[k][i] / s) * (left[k][j] / s) : sum, 0)));
+    return {rank: retained.filter(Boolean).length, pseudo, gains: singular.sort((a, b) => b - a)};
+  }
   function pair(value, name, size) {
     if (value === undefined) return Array(size).fill(0);
     if (!Array.isArray(value) || value.length !== size || !value.every(Number.isFinite)) {
@@ -105,17 +138,23 @@
     return value;
   }
   function evaluate(p, state, options = {}) {
-    return evaluateCoordinates(p, state, options, false);
+    return evaluateCoordinates(p, state, options, false, false);
   }
   function freeHinge(p, state, options = {}) {
-    return evaluateCoordinates(p, state, options, true);
+    return evaluateCoordinates(p, state, options, true, false);
   }
-  function evaluateCoordinates(p, state, options, isFree) {
+  function elbows(p, state, options = {}) {
+    return evaluateCoordinates(p, state, options, Boolean(options.blackFree), Boolean(options.blueFree));
+  }
+  function evaluateCoordinates(p, state, options, blackFree, blueFree) {
     if (!state || !state.ok) return {
       regular: false,
       reason: "A valid closed assembly is required."
     };
-    const coordinates = isFree ? ["q1", "q2", "delta"] : ["q1", "q2"];
+    const coordinates = ["q1", "q2"];
+    if (blackFree) coordinates.push("delta");
+    if (blueFree) coordinates.push("beta");
+    const hasFreeElbow = coordinates.length > 2;
     const rates = pair(options.rates, "rates", coordinates.length);
     const inputAccel = pair(options.accelerations, "accelerations", coordinates.length);
     const wrench = pair(options.wrench, "wrench", 3);
@@ -181,7 +220,7 @@
     const H = constraintJacobian.map(row => row.slice(0, 3));
     const B = constraintJacobian.map(row => row.slice(3));
     const characteristicLength = Math.max(p.a, p.b, p.c, p.d, p.e, p.f, p.g, p.h, p.r1, rotary ? p.r2 : 0);
-    const qScale = [characteristicLength, rotary ? characteristicLength : 1, characteristicLength];
+    const qScale = coordinates.map(name => name === "q2" && !rotary ? 1 : characteristicLength);
     // Equilibrate units before comparing pivots. Multiply slider column by L
     // to express all generalized coordinates as angles or length divided by L.
     const denom = [p.a * p.b, p.f * p.d, p.g * p.h];
@@ -189,13 +228,15 @@
     const scaled = constraintJacobian.map((row, i) => row.map((v, j) => v * (j === 4 && !rotary ? characteristicLength : 1) / denom[i]));
     const rankH = matrixRank(scaled.map(row => row.slice(0, 3)));
     const rankConstraint = matrixRank(scaled);
-    const freeWithMotorsLocked = isFree ? scaled.map(row => [...row.slice(0, 3), row[5]]) : null;
+    const freeWithMotorsLocked = scaled.map(row => [...row.slice(0, 3), ...row.slice(5)]);
     // A tangent may be returned as a single labeled root by the geometric solver.
     // Use its measured angle and constraint rank, not its branch label, here.
     const regular = rankH === 3 && tangency.every(x => Math.abs(x) > EPS_RANK);
     const out = {
       regular,
-      freeHinge: isFree,
+      freeHinge: blackFree,
+      blackFree,
+      blueFree,
       coordinates,
       reason: regular ? "" : "Dependent constraint matrix is singular or numerically rank deficient.",
       H,
@@ -208,7 +249,7 @@
       characteristicLength,
       transforms,
       mobilityLinearized: vars.length - rankConstraint,
-      lockedNullity: isFree ? 4 - matrixRank(freeWithMotorsLocked) : 3 - rankH,
+      lockedNullity: freeWithMotorsLocked[0].length - matrixRank(freeWithMotorsLocked),
       nearSingular: tangency.some(x => Math.abs(x) < 1e-4),
       poseJacobian: null,
       dependentJacobian: null,
@@ -236,6 +277,9 @@
       constraintRates: null,
       constraintAccelerations: null,
       poseRank: null,
+      poseNullity: null,
+      posePseudoInverse: null,
+      poseInverse: null,
       tangent: null,
       dependentVelocity: null,
       dependentAcceleration: null,
@@ -266,25 +310,25 @@
     }
     const sensitivity = {};
     for (const name of parameters) {
-      if (isFree && name === "delta") continue;
+      if (coordinates.includes(name)) continue;
       const seed = {
         [name]: 1
       };
       sensitivity[name] = closed(seed, variation(seed)).total.pose;
     }
     const dz = mult(Z, rates);
+    const motionSeed = values => Object.fromEntries(coordinates.map((name, j) => [name, values[j]]));
+    const rateSeed = motionSeed(rates);
     const v = variation({
+      ...rateSeed,
       alpha: dz[0],
       betaAngle: dz[1],
-      gamma: dz[2],
-      q1: rates[0],
-      q2: rates[1],
-      delta: isFree ? rates[2] : 0
+      gamma: dz[2]
     });
     // Quadratic (centripetal) terms at q''=z''=0. Geometric parameters are constant.
     const centripetal = (r, w) => scale(r, -w * w);
     const Xb = centripetal(r1, rates[0]);
-    const Eb = add(Xb, centripetal(c, dz[0] + (isFree ? rates[2] : 0)));
+    const Eb = add(Xb, centripetal(c, dz[0] + (rateSeed.delta || 0)));
     const bias = {
       M1: zero(),
       M2: zero(),
@@ -294,7 +338,7 @@
       J4: add(Xb, centripetal(b, dz[0])),
       J5: rotary ? centripetal(r2, rates[1]) : zero(),
       J6: add(Xb, centripetal(d, dz[1])),
-      J7: add(Xb, centripetal(e, dz[1])),
+      J7: add(Xb, centripetal(e, dz[1] + (rateSeed.beta || 0))),
       J8: add(Eb, centripetal(h, dz[2]))
     };
     const curvature = rows.map(([from, to], i) => {
@@ -304,12 +348,10 @@
     const Bqdd = mult(B, inputAccel);
     const ddz = solveH(H, curvature.map((x, i) => -x - Bqdd[i]));
     const linearAcc = variation({
+      ...motionSeed(inputAccel),
       alpha: ddz[0],
       betaAngle: ddz[1],
-      gamma: ddz[2],
-      q1: inputAccel[0],
-      q2: inputAccel[1],
-      delta: isFree ? inputAccel[2] : 0
+      gamma: ddz[2]
     });
     const acc = {};
     for (const name of Object.keys(bias)) acc[name] = add(bias[name], linearAcc.points[name]);
@@ -357,15 +399,24 @@
         return dot(dv, dv) + dot(spans[i], vFrom(acc, from, to));
       })
     });
-    if (isFree) {
-      // An unactuated revolute joint adds a configuration coordinate. Its
-      // generalized load is a torque about JX, not an available motor effort.
+    if (hasFreeElbow) {
+      // Balance angular rates using the same characteristic length as the
+      // fixed-elbow analysis. Passive generalized loads are moments about JX.
       const outputScale = [1, 1, characteristicLength];
       const normalized = J.map((row, i) => row.map((x, j) => x * outputScale[i] / qScale[j]));
-      out.poseRank = matrixRank(normalized);
+      const spectrum = poseSpectrum(normalized);
+      out.poseRank = spectrum.rank;
+      out.poseNullity = coordinates.length - out.poseRank;
       out.positionRank = matrixRank(normalized.slice(0, 2));
-      out.poseInverse = out.poseRank === 3 ?
-        inverse3(normalized).map((row, i) => row.map((x, j) => x * outputScale[j] / qScale[i])) : null;
+      const nativeInverse = m => m.map((row, i) => row.map((x, j) => x * outputScale[j] / qScale[i]));
+      out.poseInverse = coordinates.length === 3 && out.poseRank === 3 ? nativeInverse(inverse3(normalized)) : null;
+      out.posePseudoInverse = nativeInverse(spectrum.pseudo);
+      out.normalizedPoseGains = spectrum.gains;
+      if (blueFree) {
+        // Change M2 while cancelling the X→J6 bearing rate with the β rate.
+        // X→J7, J8 and the tool are then stationary on a regular branch.
+        out.blueSelfMotion = coordinates.map(name => name === "q2" ? 1 : name === "beta" ? -Z[1][1] : 0);
+      }
       return out;
     }
 
@@ -395,6 +446,7 @@
     };
     Object.assign(out, {
       poseRank,
+      poseNullity: 2 - poseRank,
       tangent,
       positionRank: tangent ? 1 : 0,
       positionPseudoInverse: tangent ? [scale(tangent, 1 / speed), [0, 0]] : [[0, 0], [0, 0]],
@@ -413,6 +465,7 @@
   return {
     evaluate,
     freeHinge,
+    elbows,
     frame,
     members,
     parameters,
