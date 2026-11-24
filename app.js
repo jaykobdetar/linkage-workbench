@@ -28,6 +28,7 @@
   const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
   const canvas = $("plot"),
     ctx = canvas.getContext("2d");
+  const transformCells = [makeTransformCells("toolForward"), makeTransformCells("toolReverse")];
   let p,
     q1,
     q2,
@@ -59,6 +60,37 @@
   function matrix(name, mat) {
     const value = Array.isArray(mat) && mat.length ? mat.map(row => (Array.isArray(row) ? row : [row]).map(x => precise(x).padStart(12)).join(" ")).join("\n") : "Undefined in this configuration";
     return '<div class="matrix"><strong>' + esc(name) + "</strong><pre>" + esc(value) + "</pre></div>";
+  }
+  function makeTransformCells(id) {
+    const body = $(id).createTBody();
+    const cells = [];
+    for (let r = 0; r < 3; r++) {
+      const row = body.insertRow();
+      for (let c = 0; c < 3; c++) {
+        const cell = row.insertCell();
+        cell.dataset.coefficient = String(3 * r + c);
+        cells.push(cell);
+      }
+    }
+    return cells;
+  }
+  function updateToolTransforms(tool) {
+    const values = [tool?.forward, tool?.inverse];
+    transformCells.forEach((cells, direction) => {
+      const coefficients = values[direction]?.flat();
+      cells.forEach((cell, i) => {
+        const value = coefficients?.[i];
+        let display = "—";
+        if (Number.isFinite(value)) {
+          const digits = i % 3 === 2 ? 3 : 6;
+          display = Math.abs(value) >= 1e6 ? value.toExponential(3) : String(Number(fmt(value, digits)));
+        }
+        if (cell.textContent !== display) cell.textContent = display;
+      });
+    });
+    const status = $("transformStatus");
+    status.hidden = Boolean(tool);
+    if (!tool) status.textContent = "The current inputs have no assembled tool frame.";
   }
   function say(s = "", warn = false) {
     $("notice").textContent = s;
@@ -111,6 +143,8 @@
     }
     $("q2unit").textContent = rotary ? "°" : "mm";
     $("q2label").textContent = rotary ? "crank angle" : "slider travel";
+    $("inverseMotors").value = state.ok ? "M1 " + fmt(deg(q1)) + "° · M2 " +
+      fmt(rotary ? deg(q2) : q2) + (rotary ? "°" : " mm") : "No assembled pose";
     [4, 6, 8].forEach((id, i) => $("s" + id).value = String(branch[i]));
   }
   function allowedForward(params, a, b, choice) {
@@ -149,6 +183,7 @@
   function updateStatus() {
     const valid = state.ok;
     const d = valid ? getDiff() : null;
+    updateToolTransforms(valid ? (d?.transforms.tool ?? D.frame(state.points.EE, state.phi)) : null);
     let status = valid ? "Assembled" : "Unreachable";
     if (state.code === "continuum") {
       status = "Free angle needed";
@@ -174,19 +209,27 @@
     return Math.max(0, ...Object.values(state.residuals || {}).filter(Number.isFinite).map(Math.abs));
   }
   function setMode(id) {
+    if (id === controlMode) return;
     if (playback) stopPlay();
+    clearTarget();
     controlMode = id;
     $("forwardPanel").hidden = id !== "forward";
     $("inversePanel").hidden = id !== "inverse";
     $("forwardMode").setAttribute("aria-pressed", id === "forward");
     $("inverseMode").setAttribute("aria-pressed", id === "inverse");
-    if (id === "inverse" && state.ok) fillTarget();
+    if (state.ok && id === "inverse") {
+      fillTarget();
+      say("Target starts at the displayed EE. Drag to pick a new position.");
+    } else {
+      say(state.ok ? "Adjust M1 or M2 to move the linkage." : state.reason, !state.ok);
+    }
+    queueDraw();
   }
-  function fillTarget() {
+  function fillTarget(preserveAngle = false) {
     const point = state.points.EE;
     $("tx").value = point[0].toPrecision(16);
     $("ty").value = point[1].toPrecision(16);
-    $("tphi").value = deg(state.phi).toPrecision(16);
+    if (!preserveAngle) $("tphi").value = deg(state.phi).toPrecision(16);
   }
   function clearTarget() {
     target = null;
@@ -219,10 +262,13 @@
     refresh({
       keepMessage: true
     });
+    if (state.ok && !$("orient").checked) $("tphi").value = deg(state.phi).toPrecision(16);
   }
   function solveTarget(x, y, phi) {
     if (!Number.isFinite(x) || !Number.isFinite(y) || phi !== undefined && !Number.isFinite(phi)) {
+      clearTarget();
       say("Enter finite numbers for each target coordinate.", true);
+      queueDraw();
       return;
     }
     const args = {
@@ -240,13 +286,19 @@
     target = [x, y];
     let html = "";
     if (ikList.length) {
-      ikList.sort((a, b) => a.branch.reduce((v, s, i) => v + (s !== branch[i]), 0) - b.branch.reduce((v, s, i) => v + (s !== branch[i]), 0) || Math.abs(wrap(a.q1 - q1)) - Math.abs(wrap(b.q1 - q1)));
-      const msg = phi === undefined ? ikList.length + " assembly realization(s) at current M2. Open position families for the admissible M2 ranges." : ikList.length + " full-pose realization(s).";
+      const branchChanges = s => s.branch.filter((sign, i) => sign !== branch[i]).length;
+      const motorDistance = s => Math.hypot(wrap(s.q1 - q1),
+        p.mode === "rotary" ? wrap(s.q2 - q2) : (s.q2 - q2) / p.r1);
+      ikList.sort((a, b) => branchChanges(a) - branchChanges(b) || motorDistance(a) - motorDistance(b));
+      const msg = ikList.length + (ikList.length === 1 ? " solution" : " solutions") +
+        (phi === undefined ? " at the current M2." : " for this position and tool angle.");
       html = "<p>" + esc(msg) + "</p>" + ikList.map((s, i) => '<button class="chip" data-sol="' + i + '" title="Select this solution">#' + (i + 1) + " " + (s.signs || s.branch).map(signLabel).join("") + " · M1 " + fmt(deg(s.q1), 3) + "° · M2 " + fmt(p.mode === "rotary" ? deg(s.q2) : s.q2, 3) + (p.mode === "rotary" ? "°" : " mm") + "</button>").join("");
-      say(msg);
+      const alreadyAtTarget = state.ok && branchChanges(ikList[0]) === 0 && motorDistance(ikList[0]) <= 1e-12;
+      say(alreadyAtTarget ? "The displayed pose already reaches this target." : "Solved. The linkage shows the selected motor settings.");
       adopt(ikList[0]);
     } else {
-      const msg = result.exceptional?.length ? "A continuous inverse family exists. See its free coordinate below." : families.length ? "The black-chain target has an inverse family. Inspect its feasibility below or change M2." : "No assembly solution at this target.";
+      const reason = result.exceptional?.length ? "A continuous inverse family exists. See its free coordinate below." : families.length ? "No solution at the current M2. Inspect the position families below for other M2 settings." : "No assembly reaches this exact target. Drag with snapping on to pick a reachable position.";
+      const msg = reason + (state.ok ? " The linkage holds its previous pose." : "");
       say(msg, true);
       html = '<p class="warning">' + esc(msg) + "</p>";
       queueDraw();
@@ -845,10 +897,11 @@
     }
     q1 = qbest;
     target = point;
-    say("Projected pointer to the current assembly and M2 slice. Target offset " + fmt(score, 3) + " mm.", score > K.tolerance(p));
+    say("Snapped to the reachable path at fixed M2. Pointer offset " + fmt(score, 3) + " mm.");
     refresh({
       keepMessage: true
     });
+    if (controlMode === "inverse" && state.ok) fillTarget($("orient").checked);
   }
   canvas.addEventListener("pointerdown", e => {
     if (!map || e.button !== 0) return;
@@ -866,9 +919,12 @@
       projectTarget(point);
     } else {
       setMode("inverse");
+      clearTarget();
+      target = point;
       $("tx").value = point[0].toPrecision(16);
       $("ty").value = point[1].toPrecision(16);
-      solveTarget(...point, $("orient").checked ? Number($("tphi").value) * rad : undefined);
+      say("Release to solve for this exact target.");
+      queueDraw();
     }
   });
   canvas.addEventListener("pointermove", e => {
@@ -876,10 +932,6 @@
     const pos = screenPoint(e);
     if (drag.domain) {
       projectTarget(pos);
-      if (controlMode === "inverse") {
-        $("tx").value = pos[0].toPrecision(12);
-        $("ty").value = pos[1].toPrecision(12);
-      }
     } else {
       target = pos;
       $("tx").value = pos[0].toPrecision(16);
@@ -891,7 +943,7 @@
     if (!drag || e.pointerId !== drag.id) return;
     const exact = !drag.domain;
     drag = null;
-    if (exact && target) solveTarget(...target, $("orient").checked ? Number($("tphi").value) * rad : undefined);
+    if (exact && target) solveTarget(...target, $("orient").checked ? $("tphi").valueAsNumber * rad : undefined);
   }
   canvas.addEventListener("pointerup", endDrag);
   canvas.addEventListener("pointercancel", () => {
@@ -899,7 +951,16 @@
   });
   $("forwardMode").onclick = () => setMode("forward");
   $("inverseMode").onclick = () => setMode("inverse");
-  $("orient").onchange = () => $("angleLabel").hidden = !$("orient").checked;
+  function targetEdited() {
+    clearTarget();
+    say("Choose Solve exact target to apply these coordinates.");
+    queueDraw();
+  }
+  for (const id of ["tx", "ty", "tphi"]) $(id).oninput = targetEdited;
+  $("orient").onchange = () => {
+    $("angleLabel").hidden = !$("orient").checked;
+    targetEdited();
+  };
   $("solve").onclick = () => solveTarget($("tx").valueAsNumber, $("ty").valueAsNumber, $("orient").checked ? $("tphi").valueAsNumber * rad : undefined);
   $("ikResults").addEventListener("click", e => {
     if (e.target.dataset.sol != null) {
@@ -955,7 +1016,7 @@
     cancelAnimationFrame(playback.frame);
     playback = null;
     $("play").setAttribute("aria-pressed", "false");
-    $("play").textContent = "▶ Play motion";
+    $("play").textContent = "▶ Play motor sweep";
     for (const k of rateKeys.slice(0, 4)) {
       $(k).value = 0;
       $(k).readOnly = false;
@@ -966,6 +1027,7 @@
   }
   // q(t) = q(0) + A(1−cos(ωt)). Both derivatives use this simulation clock.
   function startPlay() {
+    if (controlMode !== "forward") return;
     if (!state.ok) {
       say("Choose a closed assembly before playing motion.", true);
       return;
@@ -981,7 +1043,7 @@
     };
     for (const k of rateKeys.slice(0, 4)) $(k).readOnly = true;
     $("play").setAttribute("aria-pressed", "true");
-    $("play").textContent = "Ⅱ Pause motion";
+    $("play").textContent = "Ⅱ Pause motor sweep";
     say("Playing a cosine sweep from this pose. Both input derivatives are shown in Motion matrices.");
     function frame(now) {
       const run = playback;

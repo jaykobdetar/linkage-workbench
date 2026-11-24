@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Linkage workbench</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=2" />
   </head>
   <body>
     <header class="mast">
@@ -59,6 +59,31 @@
           </div>
           <div id="plotInfo" class="plot-info">Drag EE to follow its reachable path.</div>
         </article>
+        <aside class="card live-transforms" id="liveTransforms" aria-labelledby="transformsTitle">
+          <div class="card-head">
+            <div>
+              <h2 id="transformsTitle">Motion matrices</h2>
+              <p>Tool frame at the end effector</p>
+            </div>
+          </div>
+          <div class="transform-body">
+            <figure>
+              <figcaption id="forwardCaption"><strong>Forward</strong>Tool → world</figcaption>
+              <div class="bracketed"><table id="toolForward" aria-labelledby="forwardCaption"></table></div>
+            </figure>
+            <figure>
+              <figcaption id="reverseCaption"><strong>Reverse</strong>World → tool</figcaption>
+              <div class="bracketed"><table id="toolReverse" aria-labelledby="reverseCaption"></table></div>
+            </figure>
+            <p class="transform-note">Read the two tool axes down the first two columns of Forward. Its last column gives the end effector’s world coordinates in mm.</p>
+            <p id="transformStatus" role="status" hidden></p>
+            <details class="transform-form">
+              <summary>Analytical form</summary>
+              <p>For a point with tool coordinates <i>u</i> and world coordinates <i>w</i>, let <i>t</i> be the end effector’s world position and <i>R</i> the rotation through its tool angle.</p>
+              <p class="transform-equation">w = R u + t<br />u = Rᵀ (w − t)</p>
+            </details>
+          </div>
+        </aside>
         <aside class="card controls">
           <div class="card-head">
             <div>
@@ -99,67 +124,72 @@
                 <input id="q2" type="range" aria-label="M2 input" />
                 <div class="range-caps"><span id="q2lo"></span><span id="q2hi"></span></div>
               </div>
+              <button
+                id="play"
+                class="secondary"
+                aria-pressed="false"
+                title="Run a small sinusoidal motor sweep from the displayed pose."
+              >
+                ▶ Play motor sweep
+              </button>
             </div>
             <div id="inversePanel" hidden>
+              <p class="subtle">With snapping on, drag the end effector (EE) along its path to find M1 at the current M2.
+                For an exact target, enter X and Y. Add a tool angle to solve for both motors.</p>
               <div class="fields target-fields">
                 <label>X <small>mm</small><input id="tx" type="number" step="any" /></label
                 ><label>Y <small>mm</small><input id="ty" type="number" step="any" /></label>
               </div>
-              <label class="check"><input id="orient" type="checkbox" />Constrain tool orientation</label
+              <label class="check"><input id="orient" type="checkbox" />Include tool angle in exact solve</label
               ><label class="target-angle" id="angleLabel" hidden
                 >Tool angle (°)<input id="tphi" type="number" step="any"
               /></label>
               <button id="solve" class="primary">Solve exact target</button>
+              <p class="mini"><strong>Displayed motors</strong><br /><output id="inverseMotors" aria-live="off"></output></p>
               <div id="ikResults" class="mini"></div>
             </div>
-            <button
-              id="play"
-              class="secondary"
-              aria-pressed="false"
-              title="Run a small sinusoidal sweep from this pose. The Motion matrices panel uses its exact derivatives."
-            >
-              ▶ Play motion
-            </button>
-            <div class="divider"></div>
-            <h3>Assembly branch</h3>
-            <div class="fields branch-fields">
-              <label
-                >J4<select id="s4">
-                  <option value="1">+1</option>
-                  <option value="-1">−1</option>
-                </select></label
-              ><label
-                >J6<select id="s6">
-                  <option value="1">+1</option>
-                  <option value="-1">−1</option>
-                </select></label
-              ><label
-                >J8<select id="s8">
-                  <option value="1">+1</option>
-                  <option value="-1">−1</option>
-                </select></label
-              >
-            </div>
-            <details id="freeControls" hidden>
-              <summary>Coincident-circle angles</summary>
-              <p class="subtle">
-                Enter a global angle (°) to sample a free joint when its closure circles coincide. Blank
-                angles leave the family unresolved.
-              </p>
+            <div class="assembly-settings">
+              <div class="divider"></div>
+              <h3>Assembly branch</h3>
               <div class="fields branch-fields">
-                <label>J3→J4<input id="free4" type="number" step="any" /></label
-                ><label>JX→J6<input id="free6" type="number" step="any" /></label
-                ><label>EE→J8<input id="free8" type="number" step="any" /></label>
+                <label
+                  >J4<select id="s4">
+                    <option value="1">+1</option>
+                    <option value="-1">−1</option>
+                  </select></label
+                ><label
+                  >J6<select id="s6">
+                    <option value="1">+1</option>
+                    <option value="-1">−1</option>
+                  </select></label
+                ><label
+                  >J8<select id="s8">
+                    <option value="1">+1</option>
+                    <option value="-1">−1</option>
+                  </select></label
+                >
               </div>
-            </details>
-            <label class="check"
-              ><input id="snap" type="checkbox" checked />Snap EE drag to current branch</label
-            >
-            <p id="notice" role="status" class="notice">Ready.</p>
-            <div class="divider"></div>
-            <nav class="companion-links" aria-label="Schematic">
-              <a href="schematic.svg">View reconstructed schematic</a>
-            </nav>
+              <details id="freeControls" hidden>
+                <summary>Coincident-circle angles</summary>
+                <p class="subtle">
+                  Enter a global angle (°) to sample a free joint when its closure circles coincide. Blank
+                  angles leave the family unresolved.
+                </p>
+                <div class="fields branch-fields">
+                  <label>J3→J4<input id="free4" type="number" step="any" /></label
+                  ><label>JX→J6<input id="free6" type="number" step="any" /></label
+                  ><label>EE→J8<input id="free8" type="number" step="any" /></label>
+                </div>
+              </details>
+              <label class="check"
+                ><input id="snap" type="checkbox" checked />Snap EE drag to current branch</label
+              >
+              <p id="notice" role="status" class="notice">Ready.</p>
+              <div class="divider"></div>
+              <nav class="companion-links" aria-label="Schematic">
+                <a href="schematic.svg">View reconstructed schematic</a>
+              </nav>
+            </div>
           </div>
         </aside>
       </section>
@@ -205,8 +235,8 @@
       </section>
     </main>
     <script src="kinematics.js"></script>
-    <script src="differential.js"></script>
+    <script src="differential.js?v=2"></script>
     <script src="numerical.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
   </body>
 </html>

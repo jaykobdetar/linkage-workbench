@@ -366,6 +366,7 @@
   }
   return {
     evaluate,
+    frame,
     members,
     parameters,
     rankTolerance: EPS_RANK

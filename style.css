@@ -101,7 +101,7 @@ main {
 }
 .bench {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-columns: minmax(0, 1fr) clamp(258px, 19vw, 284px) clamp(265px, 22vw, 320px);
   gap: 16px;
   align-items: stretch;
 }
@@ -545,6 +545,83 @@ legend {
   color: #203e45;
   margin: 6px 0 0;
 }
+.transform-body {
+  display: grid;
+  gap: 22px;
+  padding: 19px 14px;
+}
+.transform-body figure {
+  min-width: 0;
+  margin: 0;
+}
+.transform-body figcaption {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.transform-body figcaption strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+.bracketed {
+  position: relative;
+  background: #f2f7f4;
+  padding: 4px 5px;
+}
+.bracketed::before,
+.bracketed::after {
+  position: absolute;
+  inset-block: 0;
+  width: 5px;
+  border-block: 2px solid #558776;
+  content: "";
+}
+.bracketed::before {
+  left: 0;
+  border-left: 2px solid #558776;
+}
+.bracketed::after {
+  right: 0;
+  border-right: 2px solid #558776;
+}
+.bracketed table {
+  table-layout: fixed;
+}
+.bracketed td {
+  border: 0;
+  padding: 3px 2px;
+  font: 12px/1.5 var(--mono);
+  text-align: right;
+  color: var(--ink);
+}
+.bracketed td:last-child {
+  width: 35%;
+  color: var(--green);
+}
+.transform-note,
+.transform-form p,
+#transformStatus {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#transformStatus {
+  color: #964525;
+}
+.transform-form {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+.transform-form p {
+  margin-top: 4px;
+}
+.transform-form .transform-equation {
+  color: var(--ink);
+  font: 13px/1.8 var(--mono);
+}
 .block summary,
 details > summary {
   cursor: pointer;
@@ -570,14 +647,37 @@ details {
   display: none !important;
 }
 @media (min-width: 1450px) {
-  .bench {
-    grid-template-columns: minmax(0, 1fr) 350px;
-  }
   .control-body {
     padding: 17px 23px;
   }
   .plotwrap {
     min-height: 395px;
+  }
+}
+@media (min-width: 801px) and (max-width: 1099px) {
+  .bench {
+    grid-template-columns: minmax(0, 1fr) 275px;
+  }
+  .controls {
+    grid-column: 1 / -1;
+  }
+  .controls .control-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 28px;
+    align-items: start;
+  }
+  .controls .switch,
+  #forwardPanel,
+  #inversePanel {
+    grid-column: 1;
+  }
+  .assembly-settings {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .assembly-settings > .divider:first-child {
+    display: none;
   }
 }
 @media (max-width: 800px) {
@@ -625,6 +725,19 @@ details {
   }
   .plot-tools {
     gap: 10px;
+  }
+  .transform-body {
+    gap: 12px;
+  }
+}
+@media (min-width: 560px) and (max-width: 800px) {
+  .transform-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+  }
+  .transform-body > p,
+  .transform-form {
+    grid-column: 1 / -1;
   }
 }
 @media (max-width: 420px) {
