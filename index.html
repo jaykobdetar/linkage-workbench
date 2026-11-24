@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Linkage workbench</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="mast">
+      <div class="mast-inner">
+        <div class="brand">
+          <svg viewBox="0 0 54 52" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="3">
+              <path d="m7 36 16-23 21 20M7 36l27 5 10-8" />
+              <circle cx="7" cy="36" r="4" />
+              <circle cx="23" cy="13" r="4" />
+              <circle cx="44" cy="33" r="4" />
+            </g>
+          </svg>
+          <div>
+            <h1>Linkage workbench</h1>
+            <p>Planar closed-chain reconstruction</p>
+          </div>
+        </div>
+        <button
+          id="reset"
+          class="mast-button"
+          title="Restore the original illustrative geometry and pose"
+        >
+          Reset model
+        </button>
+      </div>
+    </header>
+    <main>
+      <section class="bench">
+        <article class="card stage">
+          <div class="card-head">
+            <div>
+              <h2>Mechanism view</h2>
+              <p>World frame · millimetres</p>
+            </div>
+            <div id="validity" role="status" class="status">Loading</div>
+          </div>
+          <div class="plotwrap">
+            <canvas
+              id="plot"
+              aria-label="Interactive planar linkage. Drag the end effector or enter a target in Inverse mode."
+              tabindex="0"
+            ></canvas
+            ><button id="fit" class="fit" title="Fit current mechanism to the view">Fit view</button>
+          </div>
+          <div class="plot-tools" aria-label="View overlays">
+            <label><input id="workspace" type="checkbox" checked />Workspace</label
+            ><label><input id="axes" type="checkbox" checked />Axes</label
+            ><label><input id="trace" type="checkbox" />EE trail</label
+            ><label><input id="linkLabels" type="checkbox" />Link labels</label
+            ><label><input id="crossings" type="checkbox" />Crossings</label>
+          </div>
+          <div id="plotInfo" class="plot-info">Drag EE to follow its reachable path.</div>
+        </article>
+        <aside class="card controls">
+          <div class="card-head">
+            <div>
+              <h2>Drive controls</h2>
+              <p>Actuator inputs &amp; target pose</p>
+            </div>
+          </div>
+          <div class="control-body">
+            <div class="switch" role="group" aria-label="Control mode">
+              <button id="forwardMode" aria-pressed="true">Forward</button
+              ><button id="inverseMode" aria-pressed="false">Inverse</button>
+            </div>
+            <div id="forwardPanel">
+              <div class="drive">
+                <div class="drive-title">
+                  <div><span class="pin black"></span><strong>M1</strong><span>crank angle</span></div>
+                  <div class="unit-input">
+                    <input id="q1n" aria-label="M1 angle in degrees" type="number" step="any" /><span
+                      >°</span
+                    >
+                  </div>
+                </div>
+                <input id="q1" type="range" aria-label="M1 angle" />
+                <div class="range-caps"><span id="q1lo"></span><span id="q1hi"></span></div>
+              </div>
+              <div class="drive">
+                <div class="drive-title">
+                  <div>
+                    <span class="pin blue"></span><strong>M2</strong
+                    ><span id="q2label">slider travel</span>
+                  </div>
+                  <div class="unit-input">
+                    <input id="q2n" aria-label="M2 input" type="number" step="any" /><span id="q2unit"
+                      >mm</span
+                    >
+                  </div>
+                </div>
+                <input id="q2" type="range" aria-label="M2 input" />
+                <div class="range-caps"><span id="q2lo"></span><span id="q2hi"></span></div>
+              </div>
+            </div>
+            <div id="inversePanel" hidden>
+              <div class="fields target-fields">
+                <label>X <small>mm</small><input id="tx" type="number" step="any" /></label
+                ><label>Y <small>mm</small><input id="ty" type="number" step="any" /></label>
+              </div>
+              <label class="check"><input id="orient" type="checkbox" />Constrain tool orientation</label
+              ><label class="target-angle" id="angleLabel" hidden
+                >Tool angle (°)<input id="tphi" type="number" step="any"
+              /></label>
+              <button id="solve" class="primary">Solve exact target</button>
+              <div id="ikResults" class="mini"></div>
+            </div>
+            <button
+              id="play"
+              class="secondary"
+              aria-pressed="false"
+              title="Run a small sinusoidal sweep from this pose. The Motion matrices panel uses its exact derivatives."
+            >
+              ▶ Play motion
+            </button>
+            <div class="divider"></div>
+            <h3>Assembly branch</h3>
+            <div class="fields branch-fields">
+              <label
+                >J4<select id="s4">
+                  <option value="1">+1</option>
+                  <option value="-1">−1</option>
+                </select></label
+              ><label
+                >J6<select id="s6">
+                  <option value="1">+1</option>
+                  <option value="-1">−1</option>
+                </select></label
+              ><label
+                >J8<select id="s8">
+                  <option value="1">+1</option>
+                  <option value="-1">−1</option>
+                </select></label
+              >
+            </div>
+            <details id="freeControls" hidden>
+              <summary>Coincident-circle angles</summary>
+              <p class="subtle">
+                Enter a global angle (°) to sample a free joint when its closure circles coincide. Blank
+                angles leave the family unresolved.
+              </p>
+              <div class="fields branch-fields">
+                <label>J3→J4<input id="free4" type="number" step="any" /></label
+                ><label>JX→J6<input id="free6" type="number" step="any" /></label
+                ><label>EE→J8<input id="free8" type="number" step="any" /></label>
+              </div>
+            </details>
+            <label class="check"
+              ><input id="snap" type="checkbox" checked />Snap EE drag to current branch</label
+            >
+            <p id="notice" role="status" class="notice">Ready.</p>
+            <div class="divider"></div>
+            <nav class="companion-links" aria-label="Schematic">
+              <a href="schematic.svg">View reconstructed schematic</a>
+            </nav>
+          </div>
+        </aside>
+      </section>
+      <section class="readouts" aria-label="End-effector readings">
+        <div><span>EE position X</span><strong id="rx">—</strong><small>mm</small></div>
+        <div><span>EE position Y</span><strong id="ry">—</strong><small>mm</small></div>
+        <div><span>Tool orientation</span><strong id="rphi">—</strong><small>°</small></div>
+        <div><span>Max length residual</span><strong id="rr">—</strong><small>mm</small></div>
+      </section>
+      <section class="card inspector">
+        <div class="tabs" aria-label="Inspection panels">
+          <button data-tab="joints" aria-pressed="true">Joints &amp; members</button
+          ><button data-tab="motion" aria-pressed="false">Motion matrices</button
+          ><button data-tab="geometry" aria-pressed="false">Geometry</button
+          ><button data-tab="checks" aria-pressed="false">Solver checks</button>
+        </div>
+        <div class="pane" id="joints"></div>
+        <div class="pane" id="motion" hidden>
+          <div id="rateFields"></div>
+          <div id="motionData"></div>
+        </div>
+        <div class="pane" id="geometry" hidden>
+          <div class="intro">
+            <h2>Model geometry</h2>
+            <p>Lengths use mm. Angles use degrees. These illustrative values can be edited together.</p>
+          </div>
+          <form id="geometryForm"></form>
+        </div>
+        <div class="pane" id="checks" hidden>
+          <div class="intro">
+            <h2>Constraint solver</h2>
+            <p>
+              Compare the displayed analytical assembly with an independently iterated geometric closure.
+            </p>
+          </div>
+          <button class="primary" id="compare">Compare solvers</button
+          ><label class="check numeric-check"
+            ><input type="checkbox" id="numericOverlay" />Overlay converged numerical joints</label
+          >
+          <div id="compareData" aria-live="polite"></div>
+          <div id="checkData"></div>
+        </div>
+      </section>
+    </main>
+    <script src="kinematics.js"></script>
+    <script src="differential.js"></script>
+    <script src="numerical.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
